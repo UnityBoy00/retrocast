@@ -1,0 +1,917 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>RetroCast — Multi-Device Arcade & Wireless Controller</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Socket.IO Client -->
+    <script src="/socket.io/socket.io.js"></script>
+    <!-- QR Code Generator -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <!-- JSNES Emulator Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsnes/1.2.1/jsnes.min.js"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    
+    <style>
+        /* Touch Lock & Anti-select for mobile gamepad */
+        body, html {
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+            overscroll-behavior: none;
+            background-color: #090d16;
+            color: #f3f4f6;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        /* CRT Scanline Overlay Effect */
+        .crt::after {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0; left: 0; bottom: 0; right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+            z-index: 10;
+            background-size: 100% 3px, 6px 100%;
+            pointer-events: none;
+        }
+
+        /* D-Pad Styling */
+        .dpad-btn {
+            background: linear-gradient(145deg, #2d3748, #1a202c);
+            border: 2px solid #4a5568;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            transition: transform 0.05s ease, background 0.05s ease;
+        }
+        .dpad-btn:active, .dpad-btn.active {
+            background: linear-gradient(145deg, #ea580c, #c2410c);
+            border-color: #fb923c;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.6);
+            transform: scale(0.95);
+        }
+
+        /* Action Buttons */
+        .action-btn-a {
+            background: linear-gradient(145deg, #dc2626, #991b1b);
+            box-shadow: 0 6px 0 #7f1d1d, 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+        }
+        .action-btn-a:active, .action-btn-a.active {
+            box-shadow: 0 2px 0 #7f1d1d, 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+            transform: translateY(4px);
+            filter: brightness(1.2);
+        }
+
+        /* Aspect Ratio & CRT Sharp Pixel Rendering */
+        #nesCanvas {
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+            transform: translateZ(0);
+            will-change: transform;
+        }
+        .display-4-3 {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: contain !important;
+        }
+        .display-16-9 {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: fill !important;
+        }
+
+        /* System Pill Buttons */
+        .sys-btn {
+            background: linear-gradient(145deg, #374151, #1f2937);
+            box-shadow: 0 3px 0 #111827;
+        }
+        .sys-btn:active, .sys-btn.active {
+            box-shadow: 0 1px 0 #111827;
+            transform: translateY(2px);
+        }
+
+        @keyframes pulse-fast {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        .animate-pulse-fast {
+            animation: pulse-fast 1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+    </style>
+</head>
+<body class="w-screen h-screen flex flex-col items-center justify-center relative">
+
+    <!-- ==================== LANDING HUB ==================== -->
+    <div id="landingScreen" class="w-full h-full flex flex-col items-center justify-center p-6 text-center z-20">
+        <div class="mb-8">
+            <h1 class="text-5xl md:text-6xl font-black tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-red-500 via-amber-400 to-blue-500 mb-2">
+                RETROCAST
+            </h1>
+            <p class="text-gray-400 text-sm md:text-base max-w-md">Turn your phone into a wireless gamepad for your Smart TV, PC, or Tablet browser.</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-xl">
+            <!-- Launch Game Mode -->
+            <button onclick="switchMode('game')" class="flex flex-col items-center justify-center p-8 bg-slate-800/80 hover:bg-slate-700/80 border-2 border-red-500/40 hover:border-red-500 rounded-2xl shadow-2xl transition-all duration-300 transform hover:-translate-y-1">
+                <div class="w-20 h-20 rounded-full bg-red-500/20 flex items-center justify-center text-red-400 text-4xl mb-4">
+                    <i class="fa-solid fa-tv"></i>
+                </div>
+                <h2 class="text-2xl font-bold text-white mb-1">🎮 GAME DISPLAY</h2>
+                <p class="text-xs text-gray-400">Launch on Smart TV, PC, or Laptop to run the emulator & display session code.</p>
+            </button>
+
+            <!-- Launch Controller Mode -->
+            <button onclick="switchMode('controller')" class="flex flex-col items-center justify-center p-8 bg-slate-800/80 hover:bg-slate-700/80 border-2 border-blue-500/40 hover:border-blue-500 rounded-2xl shadow-2xl transition-all duration-300 transform hover:-translate-y-1">
+                <div class="w-20 h-20 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 text-4xl mb-4">
+                    <i class="fa-solid fa-mobile-screen-button"></i>
+                </div>
+                <h2 class="text-2xl font-bold text-white mb-1">📱 CONTROLLER</h2>
+                <p class="text-xs text-gray-400">Open on smartphone browser to pair with TV & stream ROMs directly.</p>
+            </button>
+        </div>
+
+        <footer class="absolute bottom-4 text-xs text-gray-500 flex items-center space-x-2">
+            <span>Node.js WebSockets & JSNES Core</span>
+            <span>•</span>
+            <a href="javascript:void(0)" onclick="switchMode('game')" class="text-blue-400 hover:underline">Launch Display Mode</a>
+        </footer>
+    </div>
+
+
+    <!-- ==================== GAME DISPLAY MODE ==================== -->
+    <div id="gameScreen" class="hidden w-full h-full flex flex-col justify-between bg-black relative">
+        <!-- Top Bar Control & Pairing Banner -->
+        <header class="w-full bg-slate-900/95 border-b border-slate-800 p-3 flex flex-wrap items-center justify-between z-30 shadow-lg">
+            <div class="flex items-center space-x-3">
+                <button onclick="returnToLanding()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-gray-300 text-xs rounded-lg border border-slate-700 flex items-center space-x-1.5 transition">
+                    <i class="fa-solid fa-arrow-left"></i> <span>Exit</span>
+                </button>
+                <span class="font-black text-red-500 tracking-wider text-sm hidden sm:inline">RETROCAST</span>
+            </div>
+
+            <!-- Pairing Session Code Display -->
+            <div class="flex items-center space-x-4">
+                <div class="flex items-center space-x-2 bg-slate-950 px-3.5 py-1.5 rounded-xl border border-slate-800 shadow-inner">
+                    <span class="text-[11px] text-gray-400 font-medium">SESSION CODE:</span>
+                    <span id="displaySessionCode" class="text-xl font-mono font-bold tracking-widest text-amber-400">------</span>
+                    <button onclick="toggleQRCodeModal()" class="text-xs text-gray-400 hover:text-white ml-2 transition" title="Show QR Code">
+                        <i class="fa-solid fa-qrcode text-base"></i>
+                    </button>
+                </div>
+
+                <div class="flex items-center space-x-2">
+                    <span id="statusIndicator" class="w-3 h-3 rounded-full bg-amber-500 animate-pulse-fast"></span>
+                    <span id="statusText" class="text-xs font-semibold text-amber-400 hidden sm:inline">Waiting for Controller...</span>
+                    <span id="controllerCountBadge" class="text-xs bg-slate-800 px-2.5 py-1 rounded text-gray-400 font-mono border border-slate-700">0 Connected</span>
+                </div>
+            </div>
+
+            <!-- Action controls -->
+            <div class="flex items-center space-x-2">
+                <!-- Live FPS Monitor -->
+                <span id="fpsDisplay" class="hidden sm:inline text-[11px] font-mono bg-slate-950 text-emerald-400 px-2 py-1 rounded border border-slate-800">60 FPS</span>
+
+                <!-- Aspect Ratio Selector -->
+                <button onclick="toggleAspectRatio()" id="aspectBtn" class="p-1.5 bg-slate-800 hover:bg-slate-700 text-gray-300 rounded-lg text-xs px-2.5 flex items-center space-x-1 border border-slate-700" title="Toggle Aspect Ratio">
+                    <i class="fa-solid fa-tv text-amber-400"></i>
+                    <span id="aspectText" class="hidden md:inline text-[11px]">4:3 Retro</span>
+                </button>
+
+                <label for="romFileInput" class="cursor-pointer bg-red-600 hover:bg-red-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition flex items-center space-x-1.5 shadow">
+                    <i class="fa-solid fa-file-arrow-up"></i>
+                    <span class="hidden md:inline">Load NES ROM</span>
+                </label>
+                <input type="file" id="romFileInput" accept=".nes" class="hidden" onchange="loadUserROM(event)">
+                
+                <button onclick="toggleAudio()" id="audioBtn" class="p-1.5 bg-slate-800 hover:bg-slate-700 text-gray-300 rounded-lg text-xs w-8 h-8 flex items-center justify-center border border-slate-700">
+                    <i class="fa-solid fa-volume-xmark text-red-400"></i>
+                </button>
+                <button onclick="toggleFullscreen()" class="p-1.5 bg-slate-800 hover:bg-slate-700 text-gray-300 rounded-lg text-xs w-8 h-8 flex items-center justify-center border border-slate-700">
+                    <i class="fa-solid fa-expand"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Notification Toast on TV Display -->
+        <div id="tvNotification" class="hidden absolute top-16 left-1/2 -translate-x-1/2 z-40 bg-emerald-600 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-2xl border border-emerald-400 flex items-center space-x-2 animate-bounce">
+            <i class="fa-solid fa-circle-check"></i>
+            <span id="tvNotificationText">ROM Loaded!</span>
+        </div>
+
+        <!-- Game Canvas Screen Container -->
+        <main class="flex-1 w-full h-full min-h-0 min-w-0 flex items-center justify-center relative bg-black overflow-hidden p-2 sm:p-4 crt">
+            <!-- Large NES Canvas scaled to fill TV -->
+            <canvas id="nesCanvas" width="256" height="240" class="display-4-3 max-w-full max-h-full rounded shadow-2xl transition-all duration-200"></canvas>
+            
+            <!-- Fallback overlay banner if built-in demo is running -->
+            <div id="romNotice" class="absolute inset-x-4 bottom-6 max-w-md mx-auto bg-slate-900/90 border border-slate-700 rounded-xl p-3 text-center text-xs text-gray-300 backdrop-blur pointer-events-none transition-opacity duration-500">
+                <p class="font-semibold text-amber-400 mb-0.5">🎮 Playing Built-in Retro Demo Cartridge</p>
+                <p class="text-gray-400">Select a <code>.nes</code> file directly on your <strong>Phone Controller</strong> to stream games to the TV screen!</p>
+            </div>
+        </main>
+
+        <!-- QR Code Dialog Modal -->
+        <div id="qrModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div class="bg-slate-900 border border-slate-700 rounded-2xl p-6 text-center max-w-xs w-full shadow-2xl">
+                <h3 class="text-lg font-bold text-white mb-2">Scan to Connect</h3>
+                <p class="text-xs text-gray-400 mb-4">Scan this QR code with your phone camera to pair controller instantly.</p>
+                <div id="qrcode" class="bg-white p-3 rounded-xl inline-block mb-4 shadow-inner"></div>
+                <div class="text-xs text-gray-400 mb-4">
+                    Or enter code <span id="qrModalCode" class="font-mono font-bold text-amber-400 text-base">------</span> on Phone.
+                </div>
+                <button onclick="toggleQRCodeModal()" class="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-semibold border border-slate-600">Close</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ==================== PHONE CONTROLLER MODE ==================== -->
+    <div id="controllerScreen" class="hidden w-full h-full flex flex-col justify-between bg-slate-950 p-3 select-none relative overflow-hidden">
+        
+        <!-- Orientation Alert Banner (Shows in Portrait) -->
+        <div id="portraitNotice" class="w-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] sm:text-xs py-1 px-2 rounded text-center flex items-center justify-center space-x-2">
+            <i class="fa-solid fa-rotate animate-spin text-sm"></i>
+            <span>Rotate phone to <strong>Landscape</strong> for optimal gaming control.</span>
+        </div>
+
+        <!-- Connection Header & Phone ROM Upload Button -->
+        <header id="controllerHeader" class="w-full flex items-center justify-between pb-2 border-b border-slate-800">
+            <button onclick="returnToLanding()" class="text-xs text-gray-400 hover:text-white flex items-center space-x-1">
+                <i class="fa-solid fa-chevron-left"></i> <span>Menu</span>
+            </button>
+
+            <!-- Active Controller Status / Phone ROM Upload Button -->
+            <div class="flex items-center space-x-2">
+                <!-- Phone ROM Stream Button (Visible when connected) -->
+                <div id="phoneRomContainer" class="hidden">
+                    <label for="phoneRomInput" class="cursor-pointer bg-red-600 hover:bg-red-500 active:bg-red-700 text-white text-[11px] font-bold px-2.5 py-1 rounded-lg transition flex items-center space-x-1 shadow">
+                        <i class="fa-solid fa-cloud-arrow-up"></i>
+                        <span>Send ROM to TV</span>
+                    </label>
+                    <input type="file" id="phoneRomInput" accept=".nes" class="hidden" onchange="uploadRomFromPhone(event)">
+                </div>
+
+                <div class="flex items-center space-x-1.5 pl-2 border-l border-slate-800">
+                    <span id="controllerStatusBadge" class="w-2.5 h-2.5 rounded-full bg-red-500"></span>
+                    <span id="controllerStatusText" class="text-xs font-semibold text-gray-400">Disconnected</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Session Code Entry Box (When not connected) -->
+        <div id="connectForm" class="my-auto flex flex-col items-center justify-center p-6 bg-slate-900 border border-slate-800 rounded-2xl max-w-sm mx-auto w-full shadow-2xl">
+            <div class="w-12 h-12 bg-blue-500/20 text-blue-400 rounded-full flex items-center justify-center text-xl mb-3">
+                <i class="fa-solid fa-gamepad"></i>
+            </div>
+            <h2 class="text-lg font-bold text-white mb-1">Pair Controller</h2>
+            <p class="text-xs text-gray-400 text-center mb-4">Enter the 6-digit session code displayed on your TV screen.</p>
+            
+            <div class="flex space-x-2 mb-4 w-full">
+                <input type="text" id="joinCodeInput" maxlength="6" placeholder="482731" class="w-full text-center text-2xl tracking-widest font-mono bg-slate-950 border border-slate-700 text-amber-400 rounded-xl py-2.5 focus:outline-none focus:border-blue-500 uppercase">
+            </div>
+
+            <button onclick="connectToHost()" id="btnConnect" class="w-full py-3 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-bold rounded-xl shadow-lg transition flex items-center justify-center space-x-2 text-sm">
+                <span>CONNECT CONTROLLER</span>
+                <i class="fa-solid fa-arrow-right"></i>
+            </button>
+        </div>
+
+        <!-- Virtual Gamepad Interface -->
+        <div id="virtualGamepad" class="flex-1 w-full flex flex-col justify-between py-2 sm:py-4">
+            
+            <!-- System Controls Bar -->
+            <div class="w-full flex justify-center items-center space-x-8 py-1">
+                <div class="flex flex-col items-center">
+                    <button id="btn-SELECT" class="sys-btn w-16 h-6 rounded-full text-[10px] font-bold text-gray-300 uppercase tracking-tighter border border-gray-700" data-button="SELECT">SELECT</button>
+                </div>
+                <div class="flex flex-col items-center">
+                    <button id="btn-START" class="sys-btn w-16 h-6 rounded-full text-[10px] font-bold text-gray-300 uppercase tracking-tighter border border-gray-700" data-button="START">START</button>
+                </div>
+            </div>
+
+            <!-- Controller Main Area (DPad left, Action buttons right) -->
+            <div class="w-full flex-1 flex items-center justify-between px-2 sm:px-8 my-auto">
+                
+                <!-- D-PAD AREA -->
+                <div class="relative w-40 h-40 sm:w-48 sm:h-48 flex-shrink-0">
+                    <div class="absolute inset-0 m-auto w-36 h-36 sm:w-44 sm:h-44 bg-slate-900 rounded-full border border-slate-800 shadow-inner"></div>
+                    
+                    <button id="btn-UP" class="dpad-btn absolute top-0 left-1/2 -translate-x-1/2 w-12 h-16 sm:w-14 sm:h-18 rounded-t-xl flex items-center justify-center text-gray-300 text-lg" data-button="UP">
+                        <i class="fa-solid fa-caret-up"></i>
+                    </button>
+                    <button id="btn-DOWN" class="dpad-btn absolute bottom-0 left-1/2 -translate-x-1/2 w-12 h-16 sm:w-14 sm:h-18 rounded-b-xl flex items-center justify-center text-gray-300 text-lg" data-button="DOWN">
+                        <i class="fa-solid fa-caret-down"></i>
+                    </button>
+                    <button id="btn-LEFT" class="dpad-btn absolute left-0 top-1/2 -translate-y-1/2 w-16 h-12 sm:w-18 sm:h-14 rounded-l-xl flex items-center justify-center text-gray-300 text-lg" data-button="LEFT">
+                        <i class="fa-solid fa-caret-left"></i>
+                    </button>
+                    <button id="btn-RIGHT" class="dpad-btn absolute right-0 top-1/2 -translate-y-1/2 w-16 h-12 sm:w-18 sm:h-14 rounded-r-xl flex items-center justify-center text-gray-300 text-lg" data-button="RIGHT">
+                        <i class="fa-solid fa-caret-right"></i>
+                    </button>
+                    <div class="absolute inset-0 m-auto w-10 h-10 bg-slate-950 rounded-full border border-slate-800 pointer-events-none"></div>
+                </div>
+
+                <!-- ACTION BUTTONS AREA -->
+                <div class="relative w-40 h-40 sm:w-48 sm:h-48 flex items-center justify-center flex-shrink-0">
+                    <div class="flex space-x-4 sm:space-x-6 transform -rotate-12">
+                        <!-- B Button -->
+                        <div class="flex flex-col items-center">
+                            <button id="btn-B" class="action-btn-b w-16 h-16 sm:w-20 sm:h-20 rounded-full border-2 border-blue-400 flex items-center justify-center text-xl font-black text-white" data-button="B">B</button>
+                            <span class="text-[10px] font-bold text-gray-500 mt-1">RUN/FIRE</span>
+                        </div>
+                        <!-- A Button -->
+                        <div class="flex flex-col items-center">
+                            <button id="btn-A" class="action-btn-a w-16 h-16 sm:w-20 sm:h-20 rounded-full border-2 border-red-400 flex items-center justify-center text-xl font-black text-white" data-button="A">A</button>
+                            <span class="text-[10px] font-bold text-gray-500 mt-1">JUMP</span>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+            
+            <!-- Bottom Footer Bar -->
+            <footer class="w-full flex justify-between items-center text-[10px] text-gray-500 px-2 pt-1 border-t border-slate-900">
+                <span>Low Latency Socket.IO</span>
+                <button onclick="toggleHaptics()" id="hapticsToggle" class="text-gray-400 hover:text-white">
+                    <i class="fa-solid fa-mobile-retro"></i> Vibrations: ON
+                </button>
+            </footer>
+        </div>
+
+    </div>
+
+    <!-- ==================== FRONTEND JAVASCRIPT ==================== -->
+    <script>
+        /* Global Application State */
+        let socket = null;
+        let appMode = 'landing';
+        let sessionCode = '';
+        let connectedControllers = 0;
+        let hapticsEnabled = true;
+        let currentAspect = '4:3';
+
+        /* NES Engine Variables */
+        let nes = null;
+        let isRomLoaded = false;
+        let animationFrameId = null;
+
+        /* High Performance Web Audio Variables */
+        let audioCtx = null;
+        let audioScriptNode = null;
+        let audioEnabled = false;
+        const AUDIO_BUFFER_SIZE = 2048;
+        let audioBufferLeft = new Float32Array(AUDIO_BUFFER_SIZE);
+        let audioBufferRight = new Float32Array(AUDIO_BUFFER_SIZE);
+        let audioWritePtr = 0;
+        let audioReadPtr = 0;
+
+        /* JSNES Controller Key Mappings */
+        const NES_KEYS = {
+            UP: jsnes.Controller.BUTTON_UP,
+            DOWN: jsnes.Controller.BUTTON_DOWN,
+            LEFT: jsnes.Controller.BUTTON_LEFT,
+            RIGHT: jsnes.Controller.BUTTON_RIGHT,
+            A: jsnes.Controller.BUTTON_A,
+            B: jsnes.Controller.BUTTON_B,
+            START: jsnes.Controller.BUTTON_START,
+            SELECT: jsnes.Controller.BUTTON_SELECT
+        };
+
+        /* Built-in Demo Canvas Platformer state */
+        let demoPlayer = { x: 50, y: 150, vx: 0, vy: 0, grounded: false, color: '#ef4444' };
+        let demoState = { UP: false, DOWN: false, LEFT: false, RIGHT: false, A: false, B: false };
+
+        // Handle URL query parameters (Instant QR scan pairing)
+        window.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const codeParam = urlParams.get('code');
+            if (codeParam) {
+                switchMode('controller');
+                document.getElementById('joinCodeInput').value = codeParam.toUpperCase();
+                connectToHost();
+            }
+            checkOrientation();
+        });
+
+        window.addEventListener('resize', checkOrientation);
+
+        function checkOrientation() {
+            const notice = document.getElementById('portraitNotice');
+            if (window.innerHeight > window.innerWidth && appMode === 'controller') {
+                notice.classList.remove('hidden');
+            } else {
+                notice.classList.add('hidden');
+            }
+        }
+
+        /* Mode Switcher */
+        function switchMode(mode) {
+            appMode = mode;
+            document.getElementById('landingScreen').classList.add('hidden');
+            document.getElementById('gameScreen').classList.add('hidden');
+            document.getElementById('controllerScreen').classList.add('hidden');
+
+            if (mode === 'game') {
+                document.getElementById('gameScreen').classList.remove('hidden');
+                initGameMode();
+            } else if (mode === 'controller') {
+                document.getElementById('controllerScreen').classList.remove('hidden');
+                initControllerMode();
+                checkOrientation();
+            }
+        }
+
+        function returnToLanding() {
+            if (socket) socket.disconnect();
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            window.location.href = window.location.pathname;
+        }
+
+        /* ==================== GAME DISPLAY ENGINE (HOST) ==================== */
+        function initGameMode() {
+            socket = io();
+
+            socket.on('connect', () => {
+                socket.emit('create-session', (res) => {
+                    if (res.success) {
+                        sessionCode = res.code;
+                        document.getElementById('displaySessionCode').innerText = sessionCode;
+                        document.getElementById('qrModalCode').innerText = sessionCode;
+
+                        // Build QR Code
+                        const qrContainer = document.getElementById('qrcode');
+                        qrContainer.innerHTML = '';
+                        const connectUrl = `${window.location.protocol}//${window.location.host}?code=${sessionCode}`;
+                        new QRCode(qrContainer, {
+                            text: connectUrl,
+                            width: 160,
+                            height: 160
+                        });
+                    }
+                });
+            });
+
+            // Controller Connected Event
+            socket.on('controller-joined', (data) => {
+                connectedControllers = data.totalControllers;
+                updateConnectionStatus(true, `Player ${data.playerIndex} Connected!`);
+            });
+
+            // Controller Left Event
+            socket.on('controller-left', (data) => {
+                connectedControllers = data.totalControllers;
+                if (connectedControllers === 0) {
+                    updateConnectionStatus(false, 'Waiting for Controller...');
+                } else {
+                    updateConnectionStatus(true, `${connectedControllers} Controller Connected`);
+                }
+            });
+
+            // Receive ROM Data streamed from Phone Controller
+            socket.on('load-rom-data', (data) => {
+                if (nes) {
+                    nes.loadROM(data.romData);
+                    isRomLoaded = true;
+
+                    // Hide Notice Banner
+                    document.getElementById('romNotice').classList.add('opacity-0');
+                    setTimeout(() => document.getElementById('romNotice').classList.add('hidden'), 500);
+
+                    // Show visual Toast on TV
+                    showTvToast(`🎮 ROM Received from Phone: ${data.fileName}`);
+                }
+            });
+
+            // Receive Inputs from Remote Phones
+            socket.on('game-input', (data) => {
+                handleRemoteInput(data);
+            });
+
+            setupEmulator();
+            setupKeyboardAndGamepad();
+        }
+
+        function showTvToast(message) {
+            const toast = document.getElementById('tvNotification');
+            const text = document.getElementById('tvNotificationText');
+            text.innerText = message;
+            toast.classList.remove('hidden');
+            setTimeout(() => toast.classList.add('hidden'), 4000);
+        }
+
+        function updateConnectionStatus(isConnected, message) {
+            const statusIndicator = document.getElementById('statusIndicator');
+            const statusText = document.getElementById('statusText');
+            const badge = document.getElementById('controllerCountBadge');
+
+            if (isConnected) {
+                statusIndicator.className = 'w-3 h-3 rounded-full bg-green-500';
+                statusText.className = 'text-xs font-semibold text-green-400 hidden sm:inline';
+                statusText.innerText = message;
+            } else {
+                statusIndicator.className = 'w-3 h-3 rounded-full bg-amber-500 animate-pulse-fast';
+                statusText.className = 'text-xs font-semibold text-amber-400 hidden sm:inline';
+                statusText.innerText = message;
+            }
+            badge.innerText = `${connectedControllers} Connected`;
+        }
+
+        /* Translate Controller Inputs to Emulator */
+        function handleRemoteInput(data) {
+            const { playerIndex, button, action } = data;
+            const isDown = action === 'down';
+            const playerNum = playerIndex || 1;
+
+            if (isRomLoaded && nes) {
+                const nesButton = NES_KEYS[button];
+                if (nesButton !== undefined) {
+                    if (isDown) nes.buttonDown(playerNum, nesButton);
+                    else nes.buttonUp(playerNum, nesButton);
+                }
+            } else {
+                demoState[button] = isDown;
+            }
+        }
+
+        /* Keyboard Fallback */
+        function setupKeyboardAndGamepad() {
+            const keyMap = {
+                'ArrowUp': 'UP',
+                'ArrowDown': 'DOWN',
+                'ArrowLeft': 'LEFT',
+                'ArrowRight': 'RIGHT',
+                'z': 'A', 'Z': 'A',
+                'x': 'B', 'X': 'B',
+                'Enter': 'START',
+                'Shift': 'SELECT'
+            };
+
+            window.addEventListener('keydown', (e) => {
+                if (keyMap[e.key]) {
+                    handleRemoteInput({ playerIndex: 1, button: keyMap[e.key], action: 'down' });
+                }
+            });
+
+            window.addEventListener('keyup', (e) => {
+                if (keyMap[e.key]) {
+                    handleRemoteInput({ playerIndex: 1, button: keyMap[e.key], action: 'up' });
+                }
+            });
+        }
+
+        /* Web Audio Engine Initialization */
+        function initAudioEngine() {
+            if (audioCtx) return;
+            try {
+                const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+                if (AudioCtxClass) {
+                    audioCtx = new AudioCtxClass({ sampleRate: 44100 });
+                    audioScriptNode = audioCtx.createScriptProcessor(AUDIO_BUFFER_SIZE, 0, 2);
+                    
+                    audioScriptNode.onaudioprocess = (e) => {
+                        const left = e.outputBuffer.getChannelData(0);
+                        const right = e.outputBuffer.getChannelData(1);
+                        
+                        for (let i = 0; i < AUDIO_BUFFER_SIZE; i++) {
+                            if (audioReadPtr !== audioWritePtr) {
+                                left[i] = audioBufferLeft[audioReadPtr];
+                                right[i] = audioBufferRight[audioReadPtr];
+                                audioReadPtr = (audioReadPtr + 1) % AUDIO_BUFFER_SIZE;
+                            } else {
+                                left[i] = 0;
+                                right[i] = 0;
+                            }
+                        }
+                    };
+                    
+                    audioScriptNode.connect(audioCtx.destination);
+                }
+            } catch(err) {
+                console.warn("Audio init failed:", err);
+            }
+        }
+
+        function onAudioSample(left, right) {
+            if (!audioEnabled || !audioCtx) return;
+            const nextWrite = (audioWritePtr + 1) % AUDIO_BUFFER_SIZE;
+            if (nextWrite !== audioReadPtr) {
+                audioBufferLeft[audioWritePtr] = left;
+                audioBufferRight[audioWritePtr] = right;
+                audioWritePtr = nextWrite;
+            }
+        }
+
+        /* JSNES Emulator Core Setup with 60 FPS Fixed Delta Loop */
+        function setupEmulator() {
+            const canvas = document.getElementById('nesCanvas');
+            const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
+            const imageData = ctx.createImageData(256, 240);
+            const buf = new ArrayBuffer(imageData.data.length);
+            const buf8 = new Uint8ClampedArray(buf);
+            const data32 = new Uint32Array(buf);
+
+            nes = new jsnes.NES({
+                onFrame: (buffer) => {
+                    let i = 0;
+                    const len = 256 * 240;
+                    for (; i < len; i++) {
+                        data32[i] = 0xFF000000 | buffer[i];
+                    }
+                },
+                onAudioSample: onAudioSample,
+                sampleRate: 44100
+            });
+
+            let lastFrameTime = performance.now();
+            const FRAME_TIME = 1000 / 60; // 16.666ms target NTSC
+            let accumulator = 0;
+            let fpsFrames = 0;
+            let lastFpsTime = performance.now();
+
+            function renderFrame(now) {
+                animationFrameId = requestAnimationFrame(renderFrame);
+
+                const elapsed = now - lastFrameTime;
+                lastFrameTime = now;
+                accumulator += elapsed;
+
+                // Cap accumulator to avoid spiral of death lag spikes
+                if (accumulator > 100) accumulator = FRAME_TIME;
+
+                let needsRender = false;
+                while (accumulator >= FRAME_TIME) {
+                    if (isRomLoaded) {
+                        nes.frame();
+                        needsRender = true;
+                    } else {
+                        updateDemoGame();
+                        needsRender = true;
+                    }
+                    accumulator -= FRAME_TIME;
+                }
+
+                if (needsRender) {
+                    if (isRomLoaded) {
+                        imageData.data.set(buf8);
+                        ctx.putImageData(imageData, 0, 0);
+                    } else {
+                        drawDemoGame(ctx);
+                    }
+                    fpsFrames++;
+                }
+
+                // Update FPS display once every second
+                if (now - lastFpsTime >= 1000) {
+                    const fpsEl = document.getElementById('fpsDisplay');
+                    if (fpsEl) fpsEl.innerText = `${fpsFrames} FPS`;
+                    fpsFrames = 0;
+                    lastFpsTime = now;
+                }
+            }
+            requestAnimationFrame(renderFrame);
+        }
+
+        /* Read User NES ROM File on Host */
+        function loadUserROM(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const romData = e.target.result;
+                nes.loadROM(romData);
+                isRomLoaded = true;
+
+                document.getElementById('romNotice').classList.add('opacity-0');
+                setTimeout(() => document.getElementById('romNotice').classList.add('hidden'), 500);
+            };
+            reader.readAsBinaryString(file);
+        }
+
+        /* Update & Draw Fallback Platformer Demo Game */
+        function updateDemoGame() {
+            if (demoState.LEFT) demoPlayer.vx = -3;
+            else if (demoState.RIGHT) demoPlayer.vx = 3;
+            else demoPlayer.vx *= 0.8;
+
+            if (demoState.A && demoPlayer.grounded) {
+                demoPlayer.vy = -7.5;
+                demoPlayer.grounded = false;
+            }
+
+            demoPlayer.vy += 0.4;
+            demoPlayer.x += demoPlayer.vx;
+            demoPlayer.y += demoPlayer.vy;
+
+            if (demoPlayer.x < 10) demoPlayer.x = 10;
+            if (demoPlayer.x > 236) demoPlayer.x = 236;
+            if (demoPlayer.y >= 180) {
+                demoPlayer.y = 180;
+                demoPlayer.vy = 0;
+                demoPlayer.grounded = true;
+            }
+
+            if (demoPlayer.vy >= 0) {
+                if (demoPlayer.y + 16 >= 140 && demoPlayer.y + 16 <= 148 && demoPlayer.x >= 50 && demoPlayer.x <= 120) {
+                    demoPlayer.y = 140 - 16; demoPlayer.vy = 0; demoPlayer.grounded = true;
+                }
+                if (demoPlayer.y + 16 >= 100 && demoPlayer.y + 16 <= 108 && demoPlayer.x >= 140 && demoPlayer.x <= 210) {
+                    demoPlayer.y = 100 - 16; demoPlayer.vy = 0; demoPlayer.grounded = true;
+                }
+            }
+        }
+
+        function drawDemoGame(ctx) {
+            ctx.fillStyle = '#090d16';
+            ctx.fillRect(0, 0, 256, 240);
+
+            ctx.strokeStyle = '#1e293b';
+            ctx.lineWidth = 1;
+            for (let x = 0; x < 256; x += 16) {
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 240); ctx.stroke();
+            }
+
+            ctx.fillStyle = '#16a34a';
+            ctx.fillRect(0, 196, 256, 44);
+            ctx.fillStyle = '#ca8a04';
+            ctx.fillRect(60, 140, 60, 10);
+            ctx.fillRect(150, 100, 60, 10);
+
+            ctx.fillStyle = demoState.B ? '#f97316' : demoPlayer.color;
+            ctx.fillRect(demoPlayer.x, demoPlayer.y, 14, 16);
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(demoPlayer.x + (demoPlayer.vx < 0 ? 2 : 8), demoPlayer.y + 3, 4, 4);
+
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '9px monospace';
+            ctx.fillText("BUILT-IN DEMO ACTIVE", 70, 20);
+            ctx.fillText("Press A to Jump | B to Boost", 48, 35);
+        }
+
+        /* Aspect Ratio Switcher */
+        function toggleAspectRatio() {
+            const canvas = document.getElementById('nesCanvas');
+            const text = document.getElementById('aspectText');
+            
+            if (currentAspect === '4:3') {
+                currentAspect = '16:9';
+                canvas.className = 'display-16-9 max-w-full max-h-full rounded shadow-2xl transition-all duration-200';
+                text.innerText = '16:9 Stretch';
+            } else {
+                currentAspect = '4:3';
+                canvas.className = 'display-4-3 max-w-full max-h-full rounded shadow-2xl transition-all duration-200';
+                text.innerText = '4:3 Retro';
+            }
+        }
+
+        /* Utility Controls */
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => console.log(err));
+            } else {
+                document.exitFullscreen();
+            }
+        }
+
+        function toggleAudio() {
+            audioEnabled = !audioEnabled;
+            if (audioEnabled) {
+                initAudioEngine();
+                if (audioCtx && audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                }
+            }
+            const btn = document.getElementById('audioBtn');
+            btn.innerHTML = audioEnabled ? 
+                '<i class="fa-solid fa-volume-high text-green-400"></i>' : 
+                '<i class="fa-solid fa-volume-xmark text-red-400"></i>';
+        }
+
+        function toggleQRCodeModal() {
+            document.getElementById('qrModal').classList.toggle('hidden');
+        }
+
+
+        /* ==================== PHONE CONTROLLER CLIENT ==================== */
+        function initControllerMode() {
+            setupTouchListeners();
+        }
+
+        function connectToHost() {
+            const codeInput = document.getElementById('joinCodeInput').value.trim();
+            if (codeInput.length !== 6) {
+                alert('Please enter a valid 6-digit session code.');
+                return;
+            }
+
+            const btnConnect = document.getElementById('btnConnect');
+            btnConnect.disabled = true;
+            btnConnect.innerHTML = '<i class="fa-solid fa-circle-notch animate-spin"></i> <span>CONNECTING...</span>';
+
+            if (!socket) socket = io();
+
+            socket.emit('join-session', { code: codeInput }, (res) => {
+                if (res.success) {
+                    updateControllerStatus(true, `Player ${res.playerIndex}`);
+                    document.getElementById('connectForm').classList.add('hidden');
+                    document.getElementById('phoneRomContainer').classList.remove('hidden');
+                    if (hapticsEnabled && navigator.vibrate) navigator.vibrate([100, 50, 100]);
+                } else {
+                    alert(res.message);
+                    btnConnect.disabled = false;
+                    btnConnect.innerHTML = '<span>CONNECT CONTROLLER</span>';
+                }
+            });
+
+            socket.on('session-closed', (data) => {
+                alert(data.message);
+                updateControllerStatus(false, 'Host Disconnected');
+                document.getElementById('connectForm').classList.remove('hidden');
+                document.getElementById('phoneRomContainer').classList.add('hidden');
+                btnConnect.disabled = false;
+                btnConnect.innerHTML = '<span>RECONNECT CONTROLLER</span>';
+            });
+        }
+
+        /* Stream NES ROM file directly from Phone to TV */
+        function uploadRomFromPhone(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const romData = e.target.result;
+                if (socket && socket.connected) {
+                    socket.emit('upload-rom-from-phone', {
+                        romData: romData,
+                        fileName: file.name
+                    }, (res) => {
+                        if (res && res.success) {
+                            alert(`🎮 Successfully sent "${file.name}" to the TV! Starting game...`);
+                        }
+                    });
+                }
+            };
+            reader.readAsBinaryString(file);
+        }
+
+        function updateControllerStatus(isConnected, text) {
+            const badge = document.getElementById('controllerStatusBadge');
+            const statusText = document.getElementById('controllerStatusText');
+            if (isConnected) {
+                badge.className = 'w-2.5 h-2.5 rounded-full bg-green-500';
+                statusText.className = 'text-xs font-semibold text-green-400';
+            } else {
+                badge.className = 'w-2.5 h-2.5 rounded-full bg-red-500';
+                statusText.className = 'text-xs font-semibold text-red-400';
+            }
+            statusText.innerText = text;
+        }
+
+        /* Touch Control Listeners */
+        function setupTouchListeners() {
+            const buttons = document.querySelectorAll('[data-button]');
+
+            buttons.forEach(btn => {
+                const buttonName = btn.getAttribute('data-button');
+
+                const handlePress = (e) => {
+                    e.preventDefault();
+                    btn.classList.add('active');
+                    sendControllerInput(buttonName, 'down');
+                    if (hapticsEnabled && navigator.vibrate) navigator.vibrate(15);
+                };
+
+                const handleRelease = (e) => {
+                    e.preventDefault();
+                    btn.classList.remove('active');
+                    sendControllerInput(buttonName, 'up');
+                };
+
+                btn.addEventListener('pointerdown', handlePress);
+                btn.addEventListener('pointerup', handleRelease);
+                btn.addEventListener('pointercancel', handleRelease);
+                btn.addEventListener('pointerleave', handleRelease);
+            });
+        }
+
+        function sendControllerInput(button, action) {
+            if (socket && socket.connected) {
+                socket.emit('controller-input', { button, action });
+            }
+        }
+
+        function toggleHaptics() {
+            hapticsEnabled = !hapticsEnabled;
+            document.getElementById('hapticsToggle').innerHTML = hapticsEnabled ? 
+                '<i class="fa-solid fa-mobile-retro"></i> Vibrations: ON' : 
+                '<i class="fa-solid fa-mobile-xmark"></i> Vibrations: OFF';
+        }
+    </script>
+</body>
+</html>
