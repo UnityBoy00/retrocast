@@ -111,14 +111,14 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Event 4: High-frequency controller input routing (Volatile for maximum speed)
+    // Event 4: High-frequency controller input routing (Volatile for zero packet queuing delay)
     socket.on('controller-input', (data) => {
         const info = socketToSession.get(socket.id);
         if (!info || info.role !== 'controller') return;
 
         const session = activeSessions.get(info.code);
         if (session && session.hostSocketId) {
-            io.to(session.hostSocketId).emit('game-input', {
+            io.to(session.hostSocketId).volatile.emit('game-input', {
                 playerIndex: info.playerIndex,
                 button: data.button,   // 'UP', 'DOWN', 'LEFT', 'RIGHT', 'A', 'B', 'START', 'SELECT'
                 action: data.action    // 'down' or 'up'
