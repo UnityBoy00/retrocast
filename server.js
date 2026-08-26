@@ -10,6 +10,8 @@ const io = new Server(server, {
         origin: '*',
         methods: ['GET', 'POST']
     },
+    // Increase max HTTP payload size to handle ROM streaming
+    maxHttpBufferSize: 1e7, // 10MB
     pingInterval: 5000,
     pingTimeout: 10000
 });
@@ -18,7 +20,6 @@ const io = new Server(server, {
 app.use(express.static(path.join(__dirname, '/')));
 
 // Active Game Sessions Store
-// Key: 6-digit code, Value: { hostSocketId, controllers: [socketId, socketId] }
 const activeSessions = new Map();
 const socketToSession = new Map();
 
@@ -70,7 +71,7 @@ io.on('connection', (socket) => {
         }
 
         session.controllers.push(socket.id);
-        const playerIndex = session.controllers.length; // Player 1, Player 2, etc.
+        const playerIndex = session.controllers.length;
         socketToSession.set(socket.id, { code: sessionCode, role: 'controller', playerIndex });
         socket.join(sessionCode);
 
@@ -88,14 +89,35 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Event 3: High-frequency controller input routing (Volatile for maximum speed)
+    // Event 3: Stream NES ROM binary from Phone to TV
+    socket.on('upload-rom-from-phone', ({ romData, fileName }, ack) => {
+        const info = socketToSession.get(socket.id);
+        if (!info || info.role !== 'controller') return;
+
+        const session = activeSessions.get(info.code);
+        if (session && session.hostSocketId) {
+            console.log(`[ROM Stream] Controller ${socket.id} streaming "${fileName}" to TV Host ${session.hostSocketId}`);
+            
+            // Forward ROM data directly to the TV Display socket
+            io.to(session.hostSocketId).emit('load-rom-data', {
+                playerIndex: info.playerIndex,
+                romData,
+                fileName
+            });
+
+            if (typeof ack === 'function') {
+                ack({ success: true });
+            }
+        }
+    });
+
+    // Event 4: High-frequency controller input routing (Volatile for maximum speed)
     socket.on('controller-input', (data) => {
         const info = socketToSession.get(socket.id);
         if (!info || info.role !== 'controller') return;
 
         const session = activeSessions.get(info.code);
         if (session && session.hostSocketId) {
-            // Forward input payload directly to the Host screen socket
             io.to(session.hostSocketId).emit('game-input', {
                 playerIndex: info.playerIndex,
                 button: data.button,   // 'UP', 'DOWN', 'LEFT', 'RIGHT', 'A', 'B', 'START', 'SELECT'
@@ -104,7 +126,7 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Event 4: Disconnect cleanup
+    // Event 5: Disconnect cleanup
     socket.on('disconnect', () => {
         const info = socketToSession.get(socket.id);
         if (!info) return;
@@ -114,12 +136,10 @@ io.on('connection', (socket) => {
 
         if (session) {
             if (role === 'host') {
-                // Host left: close session and notify all attached controllers
                 console.log(`[Session Closed] Host ${socket.id} disconnected code: ${code}`);
                 io.to(code).emit('session-closed', { message: 'The game host device disconnected.' });
                 activeSessions.delete(code);
             } else if (role === 'controller') {
-                // Controller left: remove from session list and notify host
                 session.controllers = session.controllers.filter(id => id !== socket.id);
                 console.log(`[Controller Left] Code: ${code} | Socket: ${socket.id}`);
                 
