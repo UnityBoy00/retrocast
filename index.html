@@ -1,0 +1,1014 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>RetroCast — Ultra Low Latency 2-Player Arcade</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PeerJS for WebRTC P2P DataChannel Communication -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <!-- QR Code Generator -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <!-- JSNES Emulator -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsnes/1.2.1/jsnes.min.js"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    
+    <style>
+        body, html {
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+            overscroll-behavior: none;
+            background-color: #050811;
+            color: #f3f4f6;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            height: 100%;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+
+        /* Pixel Art TV Canvas */
+        canvas {
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+            box-shadow: 0 0 50px rgba(0, 0, 0, 0.9);
+        }
+
+        /* Virtual Gamepad Buttons */
+        .dpad-btn {
+            background: linear-gradient(145deg, #2d3748, #1a202c);
+            border: 2px solid #4a5568;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            touch-action: none;
+        }
+        .dpad-btn:active, .dpad-btn.active {
+            background: linear-gradient(145deg, #ea580c, #c2410c);
+            border-color: #fb923c;
+            transform: scale(0.95);
+        }
+
+        .action-btn {
+            box-shadow: 0 6px 0 #7f1d1d, 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+            touch-action: none;
+        }
+        .action-btn:active, .action-btn.active {
+            box-shadow: 0 2px 0 #7f1d1d, 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+            transform: translateY(4px);
+            filter: brightness(1.2);
+        }
+
+        .action-btn-b {
+            box-shadow: 0 6px 0 #1e3a8a, 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+        }
+        .action-btn-b:active, .action-btn-b.active {
+            box-shadow: 0 2px 0 #1e3a8a, 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+            transform: translateY(4px);
+        }
+
+        .sys-btn {
+            box-shadow: 0 3px 0 #111827;
+            touch-action: none;
+        }
+        .sys-btn:active, .sys-btn.active {
+            box-shadow: 0 1px 0 #111827;
+            transform: translateY(2px);
+        }
+
+        @keyframes pulse-fast {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        .animate-pulse-fast {
+            animation: pulse-fast 1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+    </style>
+</head>
+<body class="w-screen h-screen flex flex-col items-center justify-center relative">
+
+    <!-- ==================== LANDING HUB ==================== -->
+    <div id="landingScreen" class="w-full h-full flex flex-col items-center justify-center p-6 text-center z-20">
+        <div class="mb-8">
+            <h1 class="text-5xl md:text-6xl font-black tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-red-500 via-amber-400 to-blue-500 mb-2">
+                RETROCAST
+            </h1>
+            <p class="text-gray-400 text-sm md:text-base max-w-md">2-Player Low-Latency Wireless Arcade for Smart TVs & Smartphones.</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-xl">
+            <!-- Game Display Mode -->
+            <button onclick="switchMode('game')" class="flex flex-col items-center justify-center p-8 bg-slate-900/90 hover:bg-slate-800/90 border-2 border-red-500/50 hover:border-red-400 rounded-2xl shadow-2xl transition-all duration-300 transform hover:-translate-y-1">
+                <div class="w-20 h-20 rounded-full bg-red-500/20 flex items-center justify-center text-red-400 text-4xl mb-4">
+                    <i class="fa-solid fa-tv"></i>
+                </div>
+                <h2 class="text-2xl font-bold text-white mb-1">🎮 GAME DISPLAY</h2>
+                <p class="text-xs text-gray-400">Launch on Smart TV, Laptop, or PC screen to display game & audio.</p>
+            </button>
+
+            <!-- Controller Mode -->
+            <button onclick="switchMode('controller')" class="flex flex-col items-center justify-center p-8 bg-slate-900/90 hover:bg-slate-800/90 border-2 border-blue-500/50 hover:border-blue-400 rounded-2xl shadow-2xl transition-all duration-300 transform hover:-translate-y-1">
+                <div class="w-20 h-20 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 text-4xl mb-4">
+                    <i class="fa-solid fa-mobile-screen-button"></i>
+                </div>
+                <h2 class="text-2xl font-bold text-white mb-1">📱 CONTROLLER</h2>
+                <p class="text-xs text-gray-400">Open on phone to connect as Player 1 or Player 2.</p>
+            </button>
+        </div>
+    </div>
+
+
+    <!-- ==================== GAME DISPLAY (TV / PC) ==================== -->
+    <div id="gameScreen" class="hidden w-full h-full flex flex-col justify-between bg-black relative">
+        <!-- TV Header -->
+        <header id="gameHeader" class="w-full bg-slate-950/90 border-b border-slate-800 p-2 sm:p-3 flex items-center justify-between z-30 shadow-md backdrop-blur transition-all duration-300">
+            <div class="flex items-center space-x-3">
+                <button onclick="returnToLanding()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-gray-300 text-xs rounded-lg border border-slate-700 flex items-center space-x-1.5 transition">
+                    <i class="fa-solid fa-arrow-left"></i> <span>Exit</span>
+                </button>
+                <span class="font-black text-red-500 tracking-wider text-sm hidden md:inline">RETROCAST TV</span>
+            </div>
+
+            <!-- Pairing Code & Player Status Badges -->
+            <div class="flex items-center space-x-3">
+                <div class="flex items-center space-x-2 bg-slate-900 px-3 py-1 rounded-lg border border-slate-800">
+                    <span class="text-[11px] text-gray-400 font-medium">PAIR CODE:</span>
+                    <span id="displaySessionCode" class="text-lg sm:text-xl font-mono font-bold tracking-widest text-amber-400">------</span>
+                    <button onclick="toggleQRCodeModal()" class="text-xs text-gray-400 hover:text-white ml-1" title="Show QR Code">
+                        <i class="fa-solid fa-qrcode text-base"></i>
+                    </button>
+                </div>
+
+                <div class="flex items-center space-x-2">
+                    <span id="p1Badge" class="text-xs px-2 py-0.5 rounded font-bold bg-slate-800 text-gray-500 border border-slate-700">P1: OFF</span>
+                    <span id="p2Badge" class="text-xs px-2 py-0.5 rounded font-bold bg-slate-800 text-gray-500 border border-slate-700">P2: OFF</span>
+                </div>
+            </div>
+
+            <!-- Controls and Settings -->
+            <div class="flex items-center space-x-2">
+                <label for="romFileInput" class="cursor-pointer bg-red-600 hover:bg-red-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition flex items-center space-x-1.5">
+                    <i class="fa-solid fa-file-arrow-up"></i>
+                    <span class="hidden sm:inline">Load NES ROM</span>
+                </label>
+                <input type="file" id="romFileInput" accept=".nes" class="hidden" onchange="loadUserROM(event)">
+                
+                <button onclick="toggleAudio()" id="audioBtn" class="p-1.5 bg-slate-800 hover:bg-slate-700 text-gray-300 rounded-lg text-xs w-8 h-8 flex items-center justify-center border border-slate-700" title="Toggle Audio">
+                    <i class="fa-solid fa-volume-high text-green-400"></i>
+                </button>
+
+                <button onclick="toggleAspectRatio()" id="aspectBtn" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-gray-300 text-xs font-mono font-bold rounded-lg border border-slate-700" title="Change Aspect Ratio">
+                    4:3
+                </button>
+
+                <button onclick="toggleHeader()" class="p-1.5 bg-slate-800 hover:bg-slate-700 text-gray-300 rounded-lg text-xs w-8 h-8 flex items-center justify-center border border-slate-700" title="Toggle Clean Mode">
+                    <i class="fa-solid fa-eye-slash"></i>
+                </button>
+
+                <button onclick="toggleFullscreen()" class="p-1.5 bg-slate-800 hover:bg-slate-700 text-gray-300 rounded-lg text-xs w-8 h-8 flex items-center justify-center border border-slate-700">
+                    <i class="fa-solid fa-expand"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main TV Canvas Viewport -->
+        <main class="flex-1 w-full h-full flex items-center justify-center relative bg-black overflow-hidden p-1">
+            <div id="canvasWrapper" class="relative flex items-center justify-center h-full max-h-full aspect-[4/3] transition-all duration-300">
+                <canvas id="nesCanvas" width="256" height="240" class="w-full h-full object-contain rounded-sm"></canvas>
+            </div>
+
+            <!-- Toast Alert for TV -->
+            <div id="tvNotification" class="hidden absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-emerald-600 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-2xl border border-emerald-400 flex items-center space-x-2 animate-bounce">
+                <i class="fa-solid fa-circle-check"></i>
+                <span id="tvNotificationText">ROM Loaded Successfully!</span>
+            </div>
+
+            <button id="unhideHeaderBtn" onclick="toggleHeader()" class="hidden absolute top-2 right-2 z-40 bg-slate-900/80 hover:bg-slate-800 text-gray-400 hover:text-white p-2 rounded-full border border-slate-700 text-xs shadow-lg backdrop-blur">
+                <i class="fa-solid fa-eye"></i>
+            </button>
+        </main>
+
+        <!-- QR Code Modal -->
+        <div id="qrModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div class="bg-slate-900 border border-slate-700 rounded-2xl p-6 text-center max-w-xs w-full shadow-2xl">
+                <h3 class="text-lg font-bold text-white mb-2">Scan to Connect</h3>
+                <p class="text-xs text-gray-400 mb-4">Scan with your phone camera to open controller and pair instantly.</p>
+                <div id="qrcode" class="bg-white p-3 rounded-xl inline-block mb-4 shadow-inner"></div>
+                <div class="text-xs text-gray-400 mb-4">Or enter code <span id="qrModalCode" class="font-mono font-bold text-amber-400 text-base">------</span> on phone.</div>
+                <button onclick="toggleQRCodeModal()" class="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-semibold border border-slate-600">Close</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ==================== PHONE CONTROLLER MODE ==================== -->
+    <div id="controllerScreen" class="hidden w-full h-full flex flex-col justify-between bg-slate-950 p-2 sm:p-3 select-none relative overflow-hidden">
+        
+        <div id="portraitNotice" class="w-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] sm:text-xs py-1 px-2 rounded text-center flex items-center justify-center space-x-2">
+            <i class="fa-solid fa-rotate animate-spin text-sm"></i>
+            <span>Rotate phone to <strong>Landscape</strong> for optimal gaming control.</span>
+        </div>
+
+        <header id="controllerHeader" class="w-full flex items-center justify-between pb-2 border-b border-slate-800">
+            <button onclick="returnToLanding()" class="text-xs text-gray-400 hover:text-white flex items-center space-x-1">
+                <i class="fa-solid fa-chevron-left"></i> <span>Menu</span>
+            </button>
+
+            <div class="flex items-center space-x-2">
+                <label for="phoneRomInput" class="cursor-pointer bg-red-600 hover:bg-red-500 active:bg-red-700 text-white text-[11px] font-bold px-2.5 py-1 rounded-lg transition flex items-center space-x-1 shadow">
+                    <i class="fa-solid fa-cloud-arrow-up"></i>
+                    <span>Send ROM to TV</span>
+                </label>
+                <input type="file" id="phoneRomInput" accept=".nes" class="hidden" onchange="uploadRomFromPhone(event)">
+
+                <div class="flex items-center space-x-1.5 pl-2 border-l border-slate-800">
+                    <span id="controllerStatusBadge" class="w-2.5 h-2.5 rounded-full bg-red-500"></span>
+                    <span id="controllerStatusText" class="text-xs font-semibold text-gray-400">Disconnected</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Pair Connection Box -->
+        <div id="connectForm" class="my-auto flex flex-col items-center justify-center p-6 bg-slate-900 border border-slate-800 rounded-2xl max-w-sm mx-auto w-full shadow-2xl">
+            <div class="w-12 h-12 bg-blue-500/20 text-blue-400 rounded-full flex items-center justify-center text-xl mb-3">
+                <i class="fa-solid fa-gamepad"></i>
+            </div>
+            <h2 class="text-lg font-bold text-white mb-1">Pair Controller</h2>
+            <p class="text-xs text-gray-400 text-center mb-4">Enter the 6-digit pair code shown on your TV screen.</p>
+            
+            <div class="flex space-x-2 mb-4 w-full">
+                <input type="text" id="joinCodeInput" maxlength="6" placeholder="482731" class="w-full text-center text-2xl tracking-widest font-mono bg-slate-950 border border-slate-700 text-amber-400 rounded-xl py-2.5 focus:outline-none focus:border-blue-500 uppercase">
+            </div>
+
+            <button onclick="connectToTVHost()" id="btnConnect" class="w-full py-3 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-bold rounded-xl shadow-lg transition flex items-center justify-center space-x-2 text-sm">
+                <span>CONNECT TO TV</span>
+                <i class="fa-solid fa-arrow-right"></i>
+            </button>
+        </div>
+
+        <!-- Lobby Full / Single Player Active Alert Modal -->
+        <div id="fullLobbyModal" class="hidden fixed inset-0 bg-black/90 backdrop-blur-md z-50 flex items-center justify-center p-6">
+            <div class="bg-slate-900 border border-red-500/50 rounded-2xl p-6 text-center max-w-sm w-full shadow-2xl">
+                <div class="w-16 h-16 bg-red-500/20 text-red-400 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">
+                    <i class="fa-solid fa-lock"></i>
+                </div>
+                <h3 id="fullLobbyTitle" class="text-xl font-bold text-white mb-2">Lobby Locked!</h3>
+                <p id="fullLobbyMessage" class="text-xs text-gray-300 leading-relaxed mb-6">
+                    Sorry, this TV session is currently unavailable.
+                </p>
+                <button onclick="closeFullLobbyModal()" class="w-full py-3 bg-red-600 hover:bg-red-500 text-white rounded-xl text-sm font-bold shadow-lg">OK, UNDERSTOOD</button>
+            </div>
+        </div>
+
+        <!-- Virtual Gamepad Surface -->
+        <div id="virtualGamepad" class="flex-1 w-full flex flex-col justify-between py-1 sm:py-3">
+            <div class="w-full flex justify-center items-center space-x-8 py-1">
+                <button id="btn-SELECT" class="sys-btn w-16 h-6 bg-slate-800 rounded-full text-[10px] font-bold text-gray-300 uppercase border border-slate-700" data-button="SELECT">SELECT</button>
+                <button id="btn-START" class="sys-btn w-16 h-6 bg-slate-800 rounded-full text-[10px] font-bold text-gray-300 uppercase border border-slate-700" data-button="START">START</button>
+            </div>
+
+            <div class="w-full flex-1 flex items-center justify-between px-2 sm:px-8 my-auto">
+                <div class="relative w-40 h-40 sm:w-48 sm:h-48 flex-shrink-0">
+                    <div class="absolute inset-0 m-auto w-36 h-36 sm:w-44 sm:h-44 bg-slate-900 rounded-full border border-slate-800 shadow-inner"></div>
+                    <button id="btn-UP" class="dpad-btn absolute top-0 left-1/2 -translate-x-1/2 w-12 h-16 sm:w-14 sm:h-18 rounded-t-xl flex items-center justify-center text-gray-300 text-lg" data-button="UP"><i class="fa-solid fa-caret-up pointer-events-none"></i></button>
+                    <button id="btn-DOWN" class="dpad-btn absolute bottom-0 left-1/2 -translate-x-1/2 w-12 h-16 sm:w-14 sm:h-18 rounded-b-xl flex items-center justify-center text-gray-300 text-lg" data-button="DOWN"><i class="fa-solid fa-caret-down pointer-events-none"></i></button>
+                    <button id="btn-LEFT" class="dpad-btn absolute left-0 top-1/2 -translate-y-1/2 w-16 h-12 sm:w-18 sm:h-14 rounded-l-xl flex items-center justify-center text-gray-300 text-lg" data-button="LEFT"><i class="fa-solid fa-caret-left pointer-events-none"></i></button>
+                    <button id="btn-RIGHT" class="dpad-btn absolute right-0 top-1/2 -translate-y-1/2 w-16 h-12 sm:w-18 sm:h-14 rounded-r-xl flex items-center justify-center text-gray-300 text-lg" data-button="RIGHT"><i class="fa-solid fa-caret-right pointer-events-none"></i></button>
+                    <div class="absolute inset-0 m-auto w-10 h-10 bg-slate-950 rounded-full border border-slate-800 pointer-events-none"></div>
+                </div>
+
+                <div class="relative w-40 h-40 sm:w-48 sm:h-48 flex items-center justify-center flex-shrink-0">
+                    <div class="flex space-x-4 sm:space-x-6 transform -rotate-12">
+                        <div class="flex flex-col items-center">
+                            <button id="btn-B" class="action-btn action-btn-b w-16 h-16 sm:w-20 sm:h-20 bg-blue-600 rounded-full border-2 border-blue-400 flex items-center justify-center text-xl font-black text-white" data-button="B">B</button>
+                            <span class="text-[10px] font-bold text-gray-500 mt-1">RUN/FIRE</span>
+                        </div>
+                        <div class="flex flex-col items-center">
+                            <button id="btn-A" class="action-btn w-16 h-16 sm:w-20 sm:h-20 bg-red-600 rounded-full border-2 border-red-400 flex items-center justify-center text-xl font-black text-white" data-button="A">A</button>
+                            <span class="text-[10px] font-bold text-gray-500 mt-1">JUMP</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <footer class="w-full flex justify-between items-center text-[10px] text-gray-500 px-2 pt-1 border-t border-slate-900">
+                <span id="playerRoleFooter">Low Latency DataChannel</span>
+                <button onclick="toggleHaptics()" id="hapticsToggle" class="text-gray-400 hover:text-white"><i class="fa-solid fa-mobile-retro"></i> Vibrations: ON</button>
+            </footer>
+        </div>
+
+    </div>
+
+    <!-- ==================== FRONTEND ENGINE ==================== -->
+    <script>
+        let appMode = 'landing';
+        let peer = null;
+        let sessionCode = '';
+        let hapticsEnabled = true;
+        let assignedPlayerNumber = 0; // 1 or 2
+
+        /* Active Connected Controller Trackers (TV Host) */
+        const activeControllers = new Map(); // peerId -> { conn, playerNumber }
+
+        /* Aspect Ratio State (0 = 4:3, 1 = 16:9, 2 = FIT) */
+        let currentAspectMode = 0;
+
+        /* Single-Player Lock State */
+        let isSinglePlayerActive = false;
+
+        /* WebRTC Server Connection Configuration */
+        function getPeerConfig() {
+            const loc = window.location;
+            return {
+                host: loc.hostname,
+                port: loc.port ? parseInt(loc.port) : (loc.protocol === 'https:' ? 443 : 80),
+                path: '/peerjs/myapp',
+                debug: 0
+            };
+        }
+
+        /* 100% Binary CRC32 Checksum Calculator for Reliable ROM Detection */
+        function calculateCRC32(binaryString) {
+            let crcTable = window.crcTable || (window.crcTable = (function() {
+                let c, table = [];
+                for (let n = 0; n < 256; n++) {
+                    c = n;
+                    for (let k = 0; k < 8; k++) {
+                        c = ((c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1));
+                    }
+                    table[n] = c;
+                }
+                return table;
+            })());
+
+            let crc = 0 ^ (-1);
+            for (let i = 0; i < binaryString.length; i++) {
+                crc = (crc >>> 8) ^ crcTable[(crc ^ binaryString.charCodeAt(i)) & 0xFF];
+            }
+            return ((crc ^ (-1)) >>> 0).toString(16).toUpperCase();
+        }
+
+        // Known Binary Checksums for Super Mario Bros ROM Dumps
+        const KNOWN_SMB_CRC32 = [
+            '3337D024', // Super Mario Bros. (JU) (PRG0)
+            '8E38F142', // Super Mario Bros. (JU) (PRG1)
+            '981C0603', // Super Mario Bros. (E)
+            '60032A22'  // Super Mario Bros. (W)
+        ];
+
+        let isSmbRomActive = false;
+
+        /* Web Audio Engine (Runs on TV Display Native) */
+        let audioCtx = null;
+        let audioMuted = false;
+        let nextAudioTime = 0;
+
+        const frameAudioL = new Float32Array(1000);
+        const frameAudioR = new Float32Array(1000);
+        let audioSampleCount = 0;
+
+        function initAudioEngine() {
+            if (!audioCtx) {
+                const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+                if (AudioCtxClass) audioCtx = new AudioCtxClass();
+            }
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function playFrameAudio(samplesL, samplesR) {
+            if (!audioCtx || audioMuted) return;
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+
+            const count = samplesL.length;
+            if (count === 0) return;
+
+            const buffer = audioCtx.createBuffer(2, count, 44100);
+            buffer.getChannelData(0).set(samplesL);
+            buffer.getChannelData(1).set(samplesR);
+
+            const source = audioCtx.createBufferSource();
+            source.buffer = buffer;
+            source.connect(audioCtx.destination);
+
+            const now = audioCtx.currentTime;
+            if (nextAudioTime < now || nextAudioTime > now + 0.15) {
+                nextAudioTime = now + 0.02;
+            }
+
+            source.start(nextAudioTime);
+            nextAudioTime += buffer.duration;
+        }
+
+        ['click', 'touchstart', 'keydown'].forEach(evt => {
+            document.addEventListener(evt, initAudioEngine, { once: false, passive: true });
+        });
+
+        /* Canvas Setup (TV Host) */
+        const canvas = document.getElementById('nesCanvas');
+        const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
+        ctx.imageSmoothingEnabled = false;
+
+        const imageData = ctx.createImageData(256, 240);
+        const pixelBuf32 = new Uint32Array(imageData.data.buffer);
+
+        /* Fast In-Memory JSNES Engine */
+        let isRomLoaded = false;
+        let lastFrameTime = performance.now();
+        const FRAME_TIME_MS = 1000 / 60.0;
+        let lastSmbGameState = -1;
+
+        const nes = new jsnes.NES({
+            onFrame: function (frameBuffer) {
+                for (let i = 0; i < 61440; ++i) {
+                    pixelBuf32[i] = 0xFF000000 | frameBuffer[i];
+                }
+            },
+            onAudioSample: function (left, right) {
+                if (audioSampleCount < 1000) {
+                    frameAudioL[audioSampleCount] = left;
+                    frameAudioR[audioSampleCount] = right;
+                    audioSampleCount++;
+                }
+            }
+        });
+
+        const NES_KEYS = {
+            UP: jsnes.Controller.BUTTON_UP,
+            DOWN: jsnes.Controller.BUTTON_DOWN,
+            LEFT: jsnes.Controller.BUTTON_LEFT,
+            RIGHT: jsnes.Controller.BUTTON_RIGHT,
+            A: jsnes.Controller.BUTTON_A,
+            B: jsnes.Controller.BUTTON_B,
+            START: jsnes.Controller.BUTTON_START,
+            SELECT: jsnes.Controller.BUTTON_SELECT
+        };
+
+        /* Fallback 2D Demo Arcade Game */
+        const demoGame = {
+            score: 0,
+            player: { x: 30, y: 150, width: 14, height: 18, vx: 0, vy: 0, grounded: false, facingRight: true },
+            platforms: [
+                { x: 0, y: 216, w: 256, h: 24, color: '#15803d' },
+                { x: 20, y: 170, w: 50, h: 10, color: '#b45309' },
+                { x: 95, y: 135, w: 65, h: 10, color: '#b45309' },
+                { x: 185, y: 100, w: 50, h: 10, color: '#b45309' },
+                { x: 40, y: 80, w: 60, h: 10, color: '#b45309' }
+            ],
+            coins: [
+                { x: 35, y: 145, collected: false },
+                { x: 115, y: 110, collected: false },
+                { x: 140, y: 110, collected: false },
+                { x: 205, y: 75, collected: false },
+                { x: 65, y: 55, collected: false }
+            ],
+            inputs: { UP: false, DOWN: false, LEFT: false, RIGHT: false, A: false, B: false }
+        };
+
+        function resetDemoCoins() {
+            demoGame.coins.forEach(c => c.collected = false);
+            demoGame.score = 0;
+        }
+
+        function updateDemoGamePhysics() {
+            const p = demoGame.player;
+            const inP = demoGame.inputs;
+
+            const speed = inP.B ? 3.2 : 2.0;
+            if (inP.LEFT) { p.vx = -speed; p.facingRight = false; }
+            else if (inP.RIGHT) { p.vx = speed; p.facingRight = true; }
+            else { p.vx *= 0.7; }
+
+            if ((inP.A || inP.UP) && p.grounded) { p.vy = -7.2; p.grounded = false; }
+
+            p.vy += 0.45;
+            if (p.vy > 8.0) p.vy = 8.0;
+
+            p.x += p.vx;
+            if (p.x < 0) p.x = 0;
+            if (p.x + p.width > 256) p.x = 256 - p.width;
+
+            p.y += p.vy;
+            p.grounded = false;
+
+            for (let i = 0; i < demoGame.platforms.length; i++) {
+                const plat = demoGame.platforms[i];
+                if (p.x + p.width > plat.x && p.x < plat.x + plat.w) {
+                    if (p.vy >= 0 && (p.y + p.height) >= plat.y && (p.y + p.height - p.vy) <= plat.y + 4) {
+                        p.y = plat.y - p.height;
+                        p.vy = 0;
+                        p.grounded = true;
+                    }
+                }
+            }
+
+            if (p.y > 240) { p.x = 30; p.y = 150; p.vx = 0; p.vy = 0; }
+
+            demoGame.coins.forEach(c => {
+                if (!c.collected && p.x + p.width > c.x && p.x < c.x + 8 && p.y + p.height > c.y && p.y < c.y + 8) {
+                    c.collected = true;
+                    demoGame.score += 100;
+                }
+            });
+
+            if (demoGame.coins.every(c => c.collected)) {
+                setTimeout(resetDemoCoins, 1200);
+            }
+        }
+
+        function renderDemoGameCanvas(ctx) {
+            updateDemoGamePhysics();
+
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(0, 0, 256, 240);
+
+            ctx.strokeStyle = '#1e293b';
+            ctx.lineWidth = 1;
+            for (let x = 0; x < 256; x += 16) {
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 240); ctx.stroke();
+            }
+
+            demoGame.platforms.forEach(plat => {
+                ctx.fillStyle = plat.color;
+                ctx.fillRect(plat.x, plat.y, plat.w, plat.h);
+                ctx.fillStyle = '#f59e0b';
+                ctx.fillRect(plat.x, plat.y, plat.w, 2);
+            });
+
+            demoGame.coins.forEach(c => {
+                if (!c.collected) {
+                    ctx.fillStyle = '#eab308';
+                    ctx.fillRect(c.x + 1, c.y, 6, 8);
+                    ctx.fillStyle = '#fef08a';
+                    ctx.fillRect(c.x + 2, c.y + 2, 2, 4);
+                }
+            });
+
+            const p = demoGame.player;
+            ctx.fillStyle = demoGame.inputs.B ? '#f97316' : '#ef4444';
+            ctx.fillRect(p.x, p.y, p.width, p.height);
+
+            ctx.fillStyle = '#ffffff';
+            const eyeX = p.facingRight ? p.x + 8 : p.x + 2;
+            ctx.fillRect(eyeX, p.y + 3, 4, 4);
+
+            ctx.fillStyle = '#fbbf24';
+            ctx.font = 'bold 9px monospace';
+            ctx.fillText(`SCORE: ${demoGame.score}`, 8, 14);
+
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '8px monospace';
+            ctx.fillText("ARCADE DEMO (60 FPS)", 135, 14);
+            ctx.fillText("Pair Phone to Send Custom ROMs!", 35, 232);
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const codeParam = urlParams.get('code');
+            if (codeParam) {
+                switchMode('controller');
+                document.getElementById('joinCodeInput').value = codeParam.toUpperCase();
+                connectToTVHost();
+            }
+            checkOrientation();
+        });
+
+        window.addEventListener('resize', checkOrientation);
+
+        function checkOrientation() {
+            const notice = document.getElementById('portraitNotice');
+            if (window.innerHeight > window.innerWidth && appMode === 'controller') {
+                notice.classList.remove('hidden');
+            } else {
+                notice.classList.add('hidden');
+            }
+        }
+
+        function switchMode(mode) {
+            appMode = mode;
+            initAudioEngine();
+
+            document.getElementById('landingScreen').classList.add('hidden');
+            document.getElementById('gameScreen').classList.add('hidden');
+            document.getElementById('controllerScreen').classList.add('hidden');
+
+            if (mode === 'game') {
+                document.getElementById('gameScreen').classList.remove('hidden');
+                initTVMode();
+            } else if (mode === 'controller') {
+                document.getElementById('controllerScreen').classList.remove('hidden');
+                initControllerMode();
+                checkOrientation();
+            }
+        }
+
+        function returnToLanding() {
+            if (peer) { try { peer.destroy(); } catch (e) {} }
+            window.location.href = window.location.pathname;
+        }
+
+        /* Inspect Super Mario Bros RAM when binary checksum is 100% verified */
+        function checkSmbGameMode() {
+            if (!isRomLoaded || !isSmbRomActive || !nes) return;
+            try {
+                // $0770 = OperMode (0 = Title Screen, 1 = Main Game)
+                // $077A = Number of Players option (0 = 1 Player, 1 = 2 Players)
+                const operMode = nes.cpu.mem[0x0770];
+                const playerSelectOption = nes.cpu.mem[0x077A];
+
+                if (operMode === 1 && lastSmbGameState !== 1) {
+                    if (playerSelectOption === 1) {
+                        isSinglePlayerActive = false;
+                        showTvToast("🎮 2-PLAYER GAME STARTED!");
+                    } else if (playerSelectOption === 0) {
+                        isSinglePlayerActive = true;
+                        showTvToast("🎮 1-PLAYER GAME STARTED! (Lobby Locked)");
+                    }
+                } else if (operMode === 0) {
+                    // Back to Title Screen -> Unlock Single Player Lock
+                    isSinglePlayerActive = false;
+                }
+                lastSmbGameState = operMode;
+            } catch (e) {}
+        }
+
+        /* ==================== TV DISPLAY MODE (HOST) ==================== */
+        function initTVMode() {
+            sessionCode = Math.floor(100000 + Math.random() * 900000).toString();
+            document.getElementById('displaySessionCode').innerText = sessionCode;
+            document.getElementById('qrModalCode').innerText = sessionCode;
+
+            try {
+                const qrContainer = document.getElementById('qrcode');
+                if (qrContainer && typeof QRCode !== 'undefined') {
+                    qrContainer.innerHTML = '';
+                    const connectUrl = `${window.location.origin}${window.location.pathname}?code=${sessionCode}`;
+                    new QRCode(qrContainer, { text: connectUrl, width: 160, height: 160 });
+                }
+            } catch (err) {}
+
+            try {
+                if (typeof Peer !== 'undefined') {
+                    peer = new Peer('retrocast-host-' + sessionCode, getPeerConfig());
+
+                    peer.on('connection', (conn) => {
+                        // Check Single-Player Lock
+                        if (isSinglePlayerActive && activeControllers.size >= 1) {
+                            conn.on('open', () => {
+                                conn.send({
+                                    type: 'lobby_locked',
+                                    title: 'Game In Progress!',
+                                    message: 'Game already started in 1-Player mode! Single-player game is currently in progress. Please open RetroCast on another TV or browser display to host your own game session.'
+                                });
+                                setTimeout(() => conn.close(), 500);
+                            });
+                            return;
+                        }
+
+                        // Check 2-Player Lobby Limit
+                        if (activeControllers.size >= 2) {
+                            conn.on('open', () => {
+                                conn.send({
+                                    type: 'lobby_locked',
+                                    title: 'Lobby Full!',
+                                    message: 'Sorry, this TV session already has 2 active controllers connected (Player 1 & Player 2). Please launch RetroCast on another TV or browser display to host your own game session.'
+                                });
+                                setTimeout(() => conn.close(), 500);
+                            });
+                            return;
+                        }
+
+                        // Assign available player number (1 or 2)
+                        let assignedNum = 1;
+                        const existingNums = Array.from(activeControllers.values()).map(c => c.playerNumber);
+                        if (existingNums.includes(1)) assignedNum = 2;
+
+                        activeControllers.set(conn.peer, { conn, playerNumber: assignedNum });
+                        updatePlayerBadges();
+
+                        conn.on('open', () => {
+                            conn.send({ type: 'welcome', playerNumber: assignedNum });
+                        });
+
+                        conn.on('data', (data) => {
+                            if (data.type === 'input') {
+                                handleRemoteInput(assignedNum, data.button, data.action);
+                            } else if (data.type === 'rom') {
+                                loadRomData(data.romData, data.fileName);
+                            }
+                        });
+
+                        conn.on('close', () => {
+                            activeControllers.delete(conn.peer);
+                            updatePlayerBadges();
+                        });
+                    });
+                }
+            } catch (err) {}
+
+            function gameLoop(now) {
+                requestAnimationFrame(gameLoop);
+
+                const elapsed = now - lastFrameTime;
+                if (elapsed >= FRAME_TIME_MS) {
+                    lastFrameTime = now - (elapsed % FRAME_TIME_MS);
+
+                    if (isRomLoaded) {
+                        audioSampleCount = 0;
+                        nes.frame();
+                        ctx.putImageData(imageData, 0, 0);
+
+                        checkSmbGameMode();
+
+                        if (audioSampleCount > 0) {
+                            playFrameAudio(
+                                frameAudioL.subarray(0, audioSampleCount),
+                                frameAudioR.subarray(0, audioSampleCount)
+                            );
+                        }
+                    } else {
+                        renderDemoGameCanvas(ctx);
+                    }
+                }
+            }
+            requestAnimationFrame(gameLoop);
+            setupKeyboardAndGamepad();
+        }
+
+        function updatePlayerBadges() {
+            const p1 = document.getElementById('p1Badge');
+            const p2 = document.getElementById('p2Badge');
+            const nums = Array.from(activeControllers.values()).map(c => c.playerNumber);
+
+            if (nums.includes(1)) {
+                p1.className = 'text-xs px-2 py-0.5 rounded font-bold bg-green-600 text-white border border-green-500';
+                p1.innerText = 'P1: CONNECTED';
+            } else {
+                p1.className = 'text-xs px-2 py-0.5 rounded font-bold bg-slate-800 text-gray-500 border border-slate-700';
+                p1.innerText = 'P1: OFF';
+            }
+
+            if (nums.includes(2)) {
+                p2.className = 'text-xs px-2 py-0.5 rounded font-bold bg-blue-600 text-white border border-blue-500';
+                p2.innerText = 'P2: CONNECTED';
+            } else {
+                p2.className = 'text-xs px-2 py-0.5 rounded font-bold bg-slate-800 text-gray-500 border border-slate-700';
+                p2.innerText = 'P2: OFF';
+            }
+        }
+
+        function loadRomData(binaryData, fileName) {
+            initAudioEngine();
+
+            // 100% Binary Verification Checksum
+            const romCrc = calculateCRC32(binaryData);
+            isSmbRomActive = KNOWN_SMB_CRC32.includes(romCrc);
+
+            nes.loadROM(binaryData);
+            isRomLoaded = true;
+            lastSmbGameState = -1;
+            isSinglePlayerActive = false; // Reset lock on new ROM load
+            showTvToast(`🎮 Playing: ${fileName}`);
+        }
+
+        function loadUserROM(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => loadRomData(e.target.result, file.name);
+            reader.readAsBinaryString(file);
+        }
+
+        function handleRemoteInput(playerNum, button, action) {
+            const isDown = action === 'down';
+
+            if (isRomLoaded) {
+                const nesButton = NES_KEYS[button];
+                if (nesButton !== undefined) {
+                    if (isDown) nes.buttonDown(playerNum, nesButton);
+                    else nes.buttonUp(playerNum, nesButton);
+                }
+            } else {
+                demoGame.inputs[button] = isDown;
+            }
+        }
+
+        function setupKeyboardAndGamepad() {
+            const keyMap = {
+                'ArrowUp': 'UP', 'ArrowDown': 'DOWN', 'ArrowLeft': 'LEFT', 'ArrowRight': 'RIGHT',
+                'z': 'A', 'Z': 'A', 'x': 'B', 'X': 'B', 'Enter': 'START', 'Shift': 'SELECT'
+            };
+
+            window.addEventListener('keydown', (e) => {
+                if (keyMap[e.key]) handleRemoteInput(1, keyMap[e.key], 'down');
+            });
+
+            window.addEventListener('keyup', (e) => {
+                if (keyMap[e.key]) handleRemoteInput(1, keyMap[e.key], 'up');
+            });
+        }
+
+        function showTvToast(message) {
+            const toast = document.getElementById('tvNotification');
+            document.getElementById('tvNotificationText').innerText = message;
+            toast.classList.remove('hidden');
+            setTimeout(() => toast.classList.add('hidden'), 4500);
+        }
+
+        function toggleAudio() {
+            audioMuted = !audioMuted;
+            const btn = document.getElementById('audioBtn');
+            btn.innerHTML = audioMuted ? 
+                '<i class="fa-solid fa-volume-xmark text-red-400"></i>' : 
+                '<i class="fa-solid fa-volume-high text-green-400"></i>';
+        }
+
+        /* Clean State-Machine Aspect Ratio Switcher (Prevents Canvas Shrinking Bug) */
+        function updateAspectRatioUI() {
+            const wrapper = document.getElementById('canvasWrapper');
+            const btn = document.getElementById('aspectBtn');
+            
+            // Clean slate: preserve base sizing classes always
+            wrapper.className = "relative flex items-center justify-center h-full max-h-full transition-all duration-300";
+            
+            if (currentAspectMode === 0) {
+                wrapper.classList.add('aspect-[4/3]');
+                btn.innerText = '4:3';
+            } else if (currentAspectMode === 1) {
+                wrapper.classList.add('aspect-[16/9]');
+                btn.innerText = '16:9';
+            } else if (currentAspectMode === 2) {
+                wrapper.classList.add('w-full', 'max-w-full');
+                btn.innerText = 'FIT';
+            }
+        }
+
+        function toggleAspectRatio() {
+            currentAspectMode = (currentAspectMode + 1) % 3;
+            updateAspectRatioUI();
+        }
+
+        function toggleHeader() {
+            const header = document.getElementById('gameHeader');
+            const unhideBtn = document.getElementById('unhideHeaderBtn');
+            if (header.classList.contains('hidden')) {
+                header.classList.remove('hidden');
+                unhideBtn.classList.add('hidden');
+            } else {
+                header.classList.add('hidden');
+                unhideBtn.classList.remove('hidden');
+            }
+        }
+
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(() => {});
+            } else {
+                document.exitFullscreen();
+            }
+        }
+
+        function toggleQRCodeModal() {
+            document.getElementById('qrModal').classList.toggle('hidden');
+        }
+
+
+        /* ==================== PHONE CONTROLLER MODE ==================== */
+        function initControllerMode() {
+            setupTouchListeners();
+        }
+
+        function connectToTVHost() {
+            const codeInput = document.getElementById('joinCodeInput').value.trim();
+            if (codeInput.length !== 6) {
+                alert('Please enter a 6-digit session code.');
+                return;
+            }
+
+            const btnConnect = document.getElementById('btnConnect');
+            btnConnect.disabled = true;
+            btnConnect.innerHTML = '<i class="fa-solid fa-circle-notch animate-spin"></i> <span>CONNECTING...</span>';
+
+            try {
+                if (typeof Peer !== 'undefined') {
+                    peer = new Peer(getPeerConfig());
+
+                    peer.on('open', () => {
+                        const targetId = 'retrocast-host-' + codeInput;
+                        peerConnection = peer.connect(targetId, { reliable: true });
+
+                        peerConnection.on('data', (data) => {
+                            if (data.type === 'lobby_locked') {
+                                document.getElementById('fullLobbyTitle').innerText = data.title || 'Lobby Locked!';
+                                document.getElementById('fullLobbyMessage').innerText = data.message;
+                                document.getElementById('fullLobbyModal').classList.remove('hidden');
+                                updateControllerStatus(false, 'Connection Refused');
+                                btnConnect.disabled = false;
+                                btnConnect.innerHTML = '<span>CONNECT TO TV</span>';
+                            } else if (data.type === 'welcome') {
+                                assignedPlayerNumber = data.playerNumber;
+                                const playerRoleText = `PLAYER ${assignedPlayerNumber}`;
+                                updateControllerStatus(true, `Connected as ${playerRoleText}`);
+                                document.getElementById('playerRoleFooter').innerText = `Connected: ${playerRoleText}`;
+                                document.getElementById('connectForm').classList.add('hidden');
+                                if (hapticsEnabled && navigator.vibrate) navigator.vibrate([100, 50, 100]);
+                            }
+                        });
+
+                        peerConnection.on('close', () => {
+                            updateControllerStatus(false, 'Disconnected');
+                            document.getElementById('connectForm').classList.remove('hidden');
+                            btnConnect.disabled = false;
+                            btnConnect.innerHTML = '<span>CONNECT TO TV</span>';
+                        });
+
+                        peerConnection.on('error', () => {
+                            alert('TV pair code not found. Make sure TV Display is open.');
+                            btnConnect.disabled = false;
+                            btnConnect.innerHTML = '<span>CONNECT TO TV</span>';
+                        });
+                    });
+                }
+            } catch (err) {
+                alert("Connection error. Please try again.");
+                btnConnect.disabled = false;
+                btnConnect.innerHTML = '<span>CONNECT TO TV</span>';
+            }
+        }
+
+        function closeFullLobbyModal() {
+            document.getElementById('fullLobbyModal').classList.add('hidden');
+        }
+
+        function uploadRomFromPhone(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                if (peerConnection && peerConnection.open) {
+                    peerConnection.send({
+                        type: 'rom',
+                        romData: e.target.result,
+                        fileName: file.name
+                    });
+                    alert(`🎮 ROM "${file.name}" sent to TV successfully!`);
+                } else {
+                    alert("Controller not connected to TV yet.");
+                }
+            };
+            reader.readAsBinaryString(file);
+        }
+
+        function updateControllerStatus(isConnected, text) {
+            const badge = document.getElementById('controllerStatusBadge');
+            const statusText = document.getElementById('controllerStatusText');
+            badge.className = isConnected ? 'w-2.5 h-2.5 rounded-full bg-green-500' : 'w-2.5 h-2.5 rounded-full bg-red-500';
+            statusText.className = isConnected ? 'text-xs font-semibold text-green-400' : 'text-xs font-semibold text-red-400';
+            statusText.innerText = text;
+        }
+
+        function setupTouchListeners() {
+            document.querySelectorAll('[data-button]').forEach(btn => {
+                const buttonName = btn.getAttribute('data-button');
+
+                const handlePress = (e) => {
+                    e.preventDefault();
+                    btn.classList.add('active');
+                    sendControllerInput(buttonName, 'down');
+                    if (hapticsEnabled && navigator.vibrate) navigator.vibrate(15);
+                };
+
+                const handleRelease = (e) => {
+                    e.preventDefault();
+                    btn.classList.remove('active');
+                    sendControllerInput(buttonName, 'up');
+                };
+
+                btn.addEventListener('pointerdown', handlePress);
+                btn.addEventListener('pointerup', handleRelease);
+                btn.addEventListener('pointercancel', handleRelease);
+                btn.addEventListener('pointerleave', handleRelease);
+            });
+        }
+
+        function sendControllerInput(button, action) {
+            if (peerConnection && peerConnection.open) {
+                peerConnection.send({ type: 'input', button, action });
+            }
+        }
+
+        function toggleHaptics() {
+            hapticsEnabled = !hapticsEnabled;
+            document.getElementById('hapticsToggle').innerHTML = hapticsEnabled ? 
+                '<i class="fa-solid fa-mobile-retro"></i> Vibrations: ON' : 
+                '<i class="fa-solid fa-mobile-xmark"></i> Vibrations: OFF';
+        }
+    </script>
+</body>
+</html>

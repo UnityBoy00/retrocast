@@ -1,0 +1,24 @@
+{
+  "name": "retrocast-multi-device-game",
+  "version": "1.0.0",
+  "description": "Ultra low-latency 2-player multi-device arcade and wireless controller",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [
+    "nes-emulator",
+    "webrtc",
+    "peerjs",
+    "gamepad",
+    "2-player",
+    "express"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.2",
+    "peer": "^1.0.2"
+  }
+}
