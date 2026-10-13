@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>RetroCast — Multi-Device Iframe Arcade & Controller</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PeerJS for Low-Latency P2P Controller Connection -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <!-- QRCode.js library for generating QR codes -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    
+    <style>
+        body, html {
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+            overscroll-behavior: none;
+            background-color: #030712;
+            color: #f3f4f6;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            height: 100%;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+
+        /* Customizable Controller Buttons Base */
+        .dpad-btn {
+            background: linear-gradient(145deg, #1e293b, #0f172a);
+            border: 2px solid #334155;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            touch-action: none;
+        }
+        .dpad-btn:active, .dpad-btn.active {
+            background: linear-gradient(145deg, #d97706, #b45309);
+            border-color: #fbbf24;
+            transform: scale(0.95);
+        }
+
+        .action-btn {
+            box-shadow: 0 6px 0 #991b1b, 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+            touch-action: none;
+        }
+        .action-btn:active, .action-btn.active {
+            box-shadow: 0 2px 0 #991b1b, 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+            transform: translateY(4px);
+            filter: brightness(1.2);
+        }
+
+        .action-btn-b {
+            box-shadow: 0 6px 0 #1e40af, 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+        }
+        .action-btn-b:active, .action-btn-b.active {
+            box-shadow: 0 2px 0 #1e40af, 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+            transform: translateY(4px);
+        }
+
+        .sys-btn {
+            box-shadow: 0 3px 0 #020617;
+            touch-action: none;
+        }
+        .sys-btn:active, .sys-btn.active {
+            box-shadow: 0 1px 0 #020617;
+            transform: translateY(2px);
+        }
+
+        /* Customizable Edit Mode Highlight */
+        .customizable-item {
+            position: absolute;
+            transition: transform 0.05s ease;
+            touch-action: none;
+        }
+
+        body.edit-mode .customizable-item {
+            outline: 2px dashed #38bdf8;
+            outline-offset: 4px;
+            cursor: move;
+        }
+
+        body.edit-mode .customizable-item.selected-target {
+            outline: 3px solid #f59e0b !important;
+            outline-offset: 6px;
+        }
+    </style>
+</head>
+<body class="w-screen h-screen flex flex-col items-center justify-center relative">
+
+    <!-- ==================== LANDING HUB ==================== -->
+    <div id="landingScreen" class="w-full h-full flex flex-col items-center justify-center p-6 text-center z-20">
+        <div class="mb-8">
+            <h1 class="text-5xl md:text-6xl font-black tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-red-500 via-amber-400 to-blue-500 mb-2">
+                RETROCAST
+            </h1>
+            <p class="text-gray-400 text-sm md:text-base max-w-md">Multi-Device Wireless Game Arcade & Customizable Controller for Smart TVs & Phones.</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-xl">
+            <!-- Game Display Mode (TV) -->
+            <button onclick="switchMode('display')" class="flex flex-col items-center justify-center p-8 bg-slate-900/90 hover:bg-slate-800/90 border-2 border-red-500/50 hover:border-red-400 rounded-3xl shadow-2xl transition-all duration-300 transform hover:-translate-y-1">
+                <div class="w-20 h-20 rounded-2xl bg-red-500/20 flex items-center justify-center text-red-400 text-4xl mb-4">
+                    <i class="fa-solid fa-tv"></i>
+                </div>
+                <h2 class="text-2xl font-bold text-white mb-1">🖥️ GAME DISPLAY</h2>
+                <p class="text-xs text-gray-400">Launch on your TV, PC, or tablet screen to view the game iframe.</p>
+            </button>
+
+            <!-- Controller Mode (Phone) -->
+            <button onclick="switchMode('controller')" class="flex flex-col items-center justify-center p-8 bg-slate-900/90 hover:bg-slate-800/90 border-2 border-blue-500/50 hover:border-blue-400 rounded-3xl shadow-2xl transition-all duration-300 transform hover:-translate-y-1">
+                <div class="w-20 h-20 rounded-2xl bg-blue-500/20 flex items-center justify-center text-blue-400 text-4xl mb-4">
+                    <i class="fa-solid fa-mobile-screen-button"></i>
+                </div>
+                <h2 class="text-2xl font-bold text-white mb-1">📱 CONTROLLER</h2>
+                <p class="text-xs text-gray-400">Open on your smartphone to pair and control games wirelessly.</p>
+            </button>
+        </div>
+    </div>
+
+
+    <!-- ==================== DISPLAY SCREEN (TV / PC HOST) ==================== -->
+    <div id="displayScreen" class="hidden w-full h-full flex flex-col justify-between bg-black relative">
+        
+        <!-- TV Top Header Bar -->
+        <header id="displayHeader" class="w-full bg-slate-950/90 border-b border-slate-800 px-4 py-2.5 flex items-center justify-between z-30 shadow-md backdrop-blur">
+            <div class="flex items-center space-x-3">
+                <button onclick="returnToLanding()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-gray-300 text-xs rounded-xl border border-slate-700 flex items-center space-x-1.5 transition">
+                    <i class="fa-solid fa-arrow-left"></i> <span>Exit</span>
+                </button>
+                <span class="font-black text-red-500 tracking-wider text-sm hidden sm:inline">RETROCAST HOST</span>
+            </div>
+
+            <!-- Room Code & QR Info Badge -->
+            <div class="flex items-center space-x-3">
+                <div class="flex items-center space-x-2 bg-slate-900 px-3 py-1 rounded-xl border border-slate-800">
+                    <span class="text-[11px] text-gray-400 font-medium">ROOM:</span>
+                    <span id="tvRoomCode" class="text-lg font-mono font-bold tracking-widest text-amber-400">------</span>
+                    <button onclick="togglePeerModal()" class="text-xs text-amber-400 hover:text-amber-300 ml-1" title="Show QR Code">
+                        <i class="fa-solid fa-qrcode text-base"></i>
+                    </button>
+                </div>
+                <span id="tvConnectionBadge" class="text-xs px-2.5 py-1 rounded-xl font-bold bg-slate-800 text-gray-400 border border-slate-700">Waiting for Phone...</span>
+            </div>
+
+            <div class="flex items-center space-x-2">
+                <button onclick="toggleCropToolbar()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-gray-300 text-xs font-bold rounded-xl border border-slate-700 flex items-center space-x-1" title="Crop Iframe View">
+                    <i class="fa-solid fa-crop"></i>
+                    <span class="hidden md:inline">Crop View</span>
+                </button>
+                <button onclick="toggleFullscreen()" class="p-2 bg-slate-800 hover:bg-slate-700 text-gray-300 rounded-xl text-xs w-8 h-8 flex items-center justify-center border border-slate-700">
+                    <i class="fa-solid fa-expand"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Crop Viewport Toolbar (Hidden by Default) -->
+        <div id="cropToolbar" class="hidden absolute top-14 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 border border-slate-700 rounded-2xl p-3 shadow-2xl backdrop-blur flex items-center space-x-4 text-xs">
+            <span class="font-bold text-amber-400 flex items-center space-x-1"><i class="fa-solid fa-crop"></i><span>Crop Zoom:</span></span>
+            <div class="flex items-center space-x-2">
+                <label class="text-gray-400">Scale:</label>
+                <input type="range" id="cropScaleRange" min="100" max="250" value="100" class="accent-amber-500 w-28" oninput="updateCropTransform()">
+                <span id="cropScaleVal" class="font-mono text-white w-8">100%</span>
+            </div>
+            <div class="flex items-center space-x-1 border-l border-slate-700 pl-3">
+                <button onclick="adjustCropPan(0, -20)" class="w-6 h-6 bg-slate-800 text-white rounded hover:bg-slate-700">⬆️</button>
+                <button onclick="adjustCropPan(0, 20)" class="w-6 h-6 bg-slate-800 text-white rounded hover:bg-slate-700">⬇️</button>
+                <button onclick="adjustCropPan(-20, 0)" class="w-6 h-6 bg-slate-800 text-white rounded hover:bg-slate-700">⬅️</button>
+                <button onclick="adjustCropPan(20, 0)" class="w-6 h-6 bg-slate-800 text-white rounded hover:bg-slate-700">➡️</button>
+                <button onclick="resetCrop()" class="px-2 py-1 bg-slate-800 text-amber-400 rounded hover:bg-slate-700 font-bold ml-1">Reset</button>
+            </div>
+        </div>
+
+        <!-- Main TV Iframe Container -->
+        <main class="flex-1 w-full h-full flex items-center justify-center relative bg-black overflow-hidden">
+            <!-- Waiting State Notice -->
+            <div id="tvWaitingNotice" class="absolute inset-0 flex flex-col items-center justify-center p-6 text-center z-10 bg-slate-950">
+                <div class="w-20 h-20 bg-amber-500/10 border border-amber-500/20 rounded-3xl flex items-center justify-center text-amber-400 text-4xl mb-4 animate-pulse">
+                    <i class="fa-solid fa-gamepad"></i>
+                </div>
+                <h2 class="text-xl md:text-2xl font-bold text-white mb-2">Ready to Cast!</h2>
+                <p class="text-xs md:text-sm text-gray-400 max-w-md mb-6">Open RetroCast on your phone controller, connect using room code <span id="waitingCodeDisplay" class="font-mono text-amber-400 font-bold">------</span>, and send any game URL!</p>
+                <div class="flex items-center space-x-2 text-xs text-gray-500 bg-slate-900 px-4 py-2 rounded-xl border border-slate-800">
+                    <i class="fa-solid fa-circle-info text-amber-400"></i>
+                    <span>Supports all HTML5 game URLs & iframe embeds.</span>
+                </div>
+            </div>
+
+            <!-- Croppable Iframe Viewport Wrapper -->
+            <div id="iframeViewport" class="w-full h-full relative overflow-hidden hidden flex items-center justify-center">
+                <div id="iframeScaler" class="w-full h-full transition-transform duration-75 ease-out flex items-center justify-center" style="transform: scale(1) translate(0px, 0px);">
+                    <iframe id="gameIframe" 
+                            class="w-full h-full border-0 bg-black" 
+                            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-orientation-lock allow-pointer-lock allow-storage-access-by-user-activation" 
+                            allow="autoplay; fullscreen; gamepad; accelerometer; gyroscope; clipboard-write">
+                    </iframe>
+                </div>
+            </div>
+        </main>
+
+        <!-- Peer Info / QR Pairing Modal -->
+        <div id="peerModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+            <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 text-center max-w-sm w-full shadow-2xl space-y-4">
+                <div class="w-12 h-12 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex items-center justify-center mx-auto text-amber-400 text-xl">
+                    <i class="fa-solid fa-qrcode"></i>
+                </div>
+                <h3 class="text-lg font-bold text-white">Scan QR Code or Type Room Code</h3>
+                <p class="text-xs text-gray-400">Point your phone camera at the QR code below or type the code manually:</p>
+                
+                <!-- QR Code Container -->
+                <div class="bg-white p-4 rounded-2xl inline-block mx-auto shadow-inner flex justify-center items-center" id="qrcodeContainer">
+                    <div id="qrcode"></div>
+                </div>
+
+                <div class="bg-slate-950 p-3 rounded-2xl border border-slate-800 text-amber-400 font-mono text-xl font-black tracking-widest select-all shadow-inner" id="displayPeerId">
+                    ------
+                </div>
+
+                <button onclick="togglePeerModal()" class="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-2xl text-xs font-bold border border-slate-700 transition">
+                    Close
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+
+    <!-- ==================== CONTROLLER SCREEN (PHONE) ==================== -->
+    <div id="controllerScreen" class="hidden w-full h-full flex flex-col justify-between bg-slate-950 p-2 sm:p-3 select-none relative overflow-hidden">
+        
+        <!-- Controller Top Header -->
+        <header id="controllerHeader" class="w-full flex items-center justify-between pb-2 border-b border-slate-800 z-30">
+            <button onclick="returnToLanding()" class="text-xs text-gray-400 hover:text-white flex items-center space-x-1">
+                <i class="fa-solid fa-chevron-left"></i> <span>Menu</span>
+            </button>
+
+            <div class="flex items-center space-x-2">
+                <!-- Send Game URL Modal Trigger -->
+                <button onclick="toggleUrlModal()" class="bg-red-600 hover:bg-red-500 active:bg-red-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-xl transition flex items-center space-x-1.5 shadow">
+                    <i class="fa-solid fa-link"></i>
+                    <span>Game URL / Iframe</span>
+                </button>
+
+                <button onclick="toggleSettingsModal()" class="p-1.5 bg-slate-800 hover:bg-slate-700 text-gray-300 rounded-xl text-xs w-7 h-7 flex items-center justify-center border border-slate-700" title="Settings & Layout">
+                    <i class="fa-solid fa-gear"></i>
+                </button>
+
+                <div class="flex items-center space-x-1.5 pl-2 border-l border-slate-800">
+                    <span id="controllerStatusBadge" class="w-2.5 h-2.5 rounded-full bg-red-500"></span>
+                    <span id="controllerStatusText" class="text-xs font-semibold text-gray-400">Disconnected</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Pair Connection Box -->
+        <div id="connectForm" class="my-auto flex flex-col items-center justify-center p-6 bg-slate-900 border border-slate-800 rounded-3xl max-w-sm mx-auto w-full shadow-2xl z-20 space-y-4">
+            <div class="w-12 h-12 bg-blue-500/20 text-blue-400 rounded-2xl flex items-center justify-center text-xl mx-auto">
+                <i class="fa-solid fa-gamepad"></i>
+            </div>
+            <div>
+                <h2 class="text-lg font-bold text-white mb-1">Pair Phone Controller</h2>
+                <p class="text-xs text-gray-400">Enter the 6-digit room code shown on your TV screen.</p>
+            </div>
+            
+            <input type="text" id="peerIdInput" maxlength="6" placeholder="A4F8K2" class="w-full text-center text-2xl tracking-widest font-mono bg-slate-950 border border-slate-700 text-amber-400 rounded-2xl py-3 focus:outline-none focus:border-blue-500 uppercase">
+
+            <button onclick="connectToHost()" id="btnConnect" class="w-full py-3.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-bold rounded-2xl shadow-lg transition flex items-center justify-center space-x-2 text-sm">
+                <span>CONNECT TO TV</span>
+                <i class="fa-solid fa-arrow-right"></i>
+            </button>
+        </div>
+
+        <!-- URL / Iframe Input Modal -->
+        <div id="urlModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+            <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 text-left max-w-sm w-full shadow-2xl space-y-4">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-base font-bold text-white flex items-center space-x-2">
+                        <i class="fa-solid fa-globe text-red-500"></i>
+                        <span>Cast Game URL to TV</span>
+                    </h3>
+                    <button onclick="toggleUrlModal()" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+                </div>
+                <p class="text-xs text-gray-400">Paste a direct game link or full <code class="text-amber-400">&lt;iframe&gt;</code> code snippet below:</p>
+                
+                <textarea id="gameUrlInput" rows="3" placeholder="https://supermario-game.com/mario-game/mario.html" class="w-full bg-slate-950 border border-slate-800 rounded-2xl p-3 text-xs text-white focus:outline-none focus:border-red-500 font-mono"></textarea>
+
+                <div class="space-y-2">
+                    <button onclick="sendGameUrlToTV()" class="w-full py-3 bg-red-600 hover:bg-red-500 text-white rounded-2xl text-xs font-bold shadow-lg transition">
+                        CAST TO TV DISPLAY 🚀
+                    </button>
+                    <button onclick="extractIframeSrc()" class="w-full py-2 bg-slate-800 hover:bg-slate-700 text-amber-400 rounded-2xl text-xs font-semibold border border-slate-700 transition flex items-center justify-center space-x-1.5">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                        <span>Extract src from Iframe Snippet</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings & Customization Modal -->
+        <div id="settingsModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+            <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 text-center max-w-xs w-full shadow-2xl space-y-3">
+                <h3 class="text-lg font-bold text-white mb-1">Controller Settings</h3>
+                
+                <button onclick="startCustomizeLayout()" class="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl text-xs font-bold transition flex items-center justify-center space-x-2">
+                    <i class="fa-solid fa-up-down-left-right"></i>
+                    <span>CUSTOMIZE CONTROLLER LAYOUT</span>
+                </button>
+
+                <button onclick="resetControllerLayout()" class="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-amber-400 rounded-2xl text-xs font-semibold border border-slate-700 transition flex items-center justify-center space-x-2">
+                    <i class="fa-solid fa-rotate-left"></i>
+                    <span>RESET TO DEFAULT</span>
+                </button>
+
+                <button onclick="toggleHaptics()" id="hapticsToggleBtn" class="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-gray-300 rounded-2xl text-xs font-semibold border border-slate-700 transition">
+                    Vibrations: ON
+                </button>
+
+                <button onclick="toggleSettingsModal()" class="w-full py-2.5 bg-slate-950 text-gray-400 hover:text-white rounded-2xl text-xs font-medium border border-slate-800">
+                    Close
+                </button>
+            </div>
+        </div>
+
+        <!-- Edit Mode Top Bar Header -->
+        <div id="editModeBar" class="hidden absolute top-2 inset-x-2 bg-amber-500 text-slate-950 p-2.5 rounded-2xl flex items-center justify-between z-40 font-bold text-xs shadow-2xl backdrop-blur">
+            <span class="flex items-center space-x-1.5 truncate">
+                <i class="fa-solid fa-hand-pointer"></i>
+                <span>Drag to move. Tap button & use +/- to resize.</span>
+            </span>
+
+            <div class="flex items-center space-x-1.5 shrink-0">
+                <button onclick="changeSelectedSize(1.1)" class="w-7 h-7 bg-slate-950 text-white rounded-xl flex items-center justify-center font-black text-sm" title="Scale Up">+</button>
+                <button onclick="changeSelectedSize(0.9)" class="w-7 h-7 bg-slate-950 text-white rounded-xl flex items-center justify-center font-black text-sm" title="Scale Down">-</button>
+                <button onclick="resetControllerLayout()" class="px-2 py-1 bg-slate-900 text-amber-300 rounded-xl text-[10px]" title="Reset">Reset</button>
+                <button onclick="saveAndExitCustomization()" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-black shadow">DONE</button>
+            </div>
+        </div>
+
+        <!-- Virtual Gamepad Canvas Area (Customizable Elements Container) -->
+        <div id="virtualGamepad" class="flex-1 w-full relative my-auto">
+            
+            <!-- Select / Start Bar -->
+            <div id="group-SYS" class="customizable-item flex justify-center items-center space-x-6 z-10" style="top: 10px; left: 50%; transform: translateX(-50%) scale(1);">
+                <button id="btn-SELECT" class="sys-btn w-16 h-7 bg-slate-800 rounded-full text-[10px] font-bold text-gray-300 uppercase border border-slate-700" data-button="SELECT">SELECT</button>
+                <button id="btn-START" class="sys-btn w-16 h-7 bg-slate-800 rounded-full text-[10px] font-bold text-gray-300 uppercase border border-slate-700" data-button="START">START</button>
+            </div>
+
+            <!-- D-PAD CLUSTER -->
+            <div id="group-DPAD" class="customizable-item w-40 h-40 sm:w-48 sm:h-48 z-10" style="bottom: 20px; left: 20px; transform: scale(1);">
+                <div class="absolute inset-0 m-auto w-36 h-36 sm:w-44 sm:h-44 bg-slate-900/90 rounded-full border border-slate-800 shadow-inner"></div>
+                
+                <button id="btn-UP" class="dpad-btn absolute top-0 left-1/2 -translate-x-1/2 w-12 h-16 sm:w-14 sm:h-18 rounded-t-2xl flex items-center justify-center text-gray-300 text-lg" data-button="UP"><i class="fa-solid fa-caret-up pointer-events-none"></i></button>
+                <button id="btn-DOWN" class="dpad-btn absolute bottom-0 left-1/2 -translate-x-1/2 w-12 h-16 sm:w-14 sm:h-18 rounded-b-2xl flex items-center justify-center text-gray-300 text-lg" data-button="DOWN"><i class="fa-solid fa-caret-down pointer-events-none"></i></button>
+                <button id="btn-LEFT" class="dpad-btn absolute left-0 top-1/2 -translate-y-1/2 w-16 h-12 sm:w-18 sm:h-14 rounded-l-2xl flex items-center justify-center text-gray-300 text-lg" data-button="LEFT"><i class="fa-solid fa-caret-left pointer-events-none"></i></button>
+                <button id="btn-RIGHT" class="dpad-btn absolute right-0 top-1/2 -translate-y-1/2 w-16 h-12 sm:w-18 sm:h-14 rounded-r-2xl flex items-center justify-center text-gray-300 text-lg" data-button="RIGHT"><i class="fa-solid fa-caret-right pointer-events-none"></i></button>
+                <div class="absolute inset-0 m-auto w-10 h-10 bg-slate-950 rounded-full border border-slate-800 pointer-events-none"></div>
+            </div>
+
+            <!-- ACTION BUTTONS CLUSTER -->
+            <div id="group-ACTIONS" class="customizable-item w-40 h-40 sm:w-48 sm:h-48 flex items-center justify-center z-10" style="bottom: 20px; right: 20px; transform: scale(1);">
+                <div class="flex space-x-4 sm:space-x-6 transform -rotate-12">
+                    <div class="flex flex-col items-center">
+                        <button id="btn-B" class="action-btn action-btn-b w-16 h-16 sm:w-20 sm:h-20 bg-blue-600 rounded-full border-2 border-blue-400 flex items-center justify-center text-xl font-black text-white" data-button="B">B</button>
+                        <span class="text-[10px] font-bold text-gray-500 mt-1 pointer-events-none">RUN</span>
+                    </div>
+                    <div class="flex flex-col items-center">
+                        <button id="btn-A" class="action-btn w-16 h-16 sm:w-20 sm:h-20 bg-red-600 rounded-full border-2 border-red-400 flex items-center justify-center text-xl font-black text-white" data-button="A">A</button>
+                        <span class="text-[10px] font-bold text-gray-500 mt-1 pointer-events-none">JUMP</span>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <footer class="w-full flex justify-between items-center text-[10px] text-gray-500 px-2 pt-1 border-t border-slate-900 z-30">
+            <span id="playerRoleFooter">Low Latency P2P Arcade</span>
+            <span>RetroCast Custom Controls</span>
+        </footer>
+
+    </div>
+
+    <!-- ==================== SCRIPT ENGINE ==================== -->
+    <script>
+        let peer = null;
+        let conn = null;
+        let isHost = false;
+        let qrCodeInstance = null;
+        let hapticsEnabled = true;
+
+        /* Crop State Variables */
+        let cropScale = 100;
+        let cropPanX = 0;
+        let cropPanY = 0;
+
+        /* Custom Controller Layout State */
+        let isEditMode = false;
+        let selectedCustomItem = null;
+        let isDraggingCustom = false;
+        let dragOffset = { x: 0, y: 0 };
+        let initialPinchDist = 0;
+
+        const DEFAULT_LAYOUT = {
+            'group-SYS': { top: '10px', left: '50%', right: 'auto', bottom: 'auto', scale: 1.0, transformX: '-50%' },
+            'group-DPAD': { bottom: '20px', left: '20px', top: 'auto', right: 'auto', scale: 1.0, transformX: '0%' },
+            'group-ACTIONS': { bottom: '20px', right: '20px', top: 'auto', left: 'auto', scale: 1.0, transformX: '0%' }
+        };
+
+        let customLayout = JSON.parse(JSON.stringify(DEFAULT_LAYOUT));
+
+        function loadCustomLayout() {
+            try {
+                const saved = localStorage.getItem('retrocast_layout_v2');
+                if (saved) customLayout = JSON.parse(saved);
+            } catch (e) {}
+            applyLayoutToDOM();
+        }
+
+        function saveCustomLayout() {
+            try {
+                localStorage.setItem('retrocast_layout_v2', JSON.stringify(customLayout));
+            } catch (e) {}
+        }
+
+        function applyLayoutToDOM() {
+            Object.keys(customLayout).forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    const item = customLayout[id];
+                    el.style.top = item.top || 'auto';
+                    el.style.left = item.left || 'auto';
+                    el.style.bottom = item.bottom || 'auto';
+                    el.style.right = item.right || 'auto';
+                    
+                    const transformX = item.transformX || '0%';
+                    const scale = item.scale || 1.0;
+                    el.style.transform = `translateX(${transformX}) scale(${scale})`;
+                }
+            });
+        }
+
+        function resetControllerLayout() {
+            customLayout = JSON.parse(JSON.stringify(DEFAULT_LAYOUT));
+            saveCustomLayout();
+            applyLayoutToDOM();
+            if (isEditMode) deselectCustomItem();
+        }
+
+        function generateAlphanumericCode(length = 6) {
+            const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // removed ambiguous 0, O, I, 1
+            let result = '';
+            for (let i = 0; i < length; i++) {
+                result += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return result;
+        }
+
+        function switchMode(mode) {
+            document.getElementById('landingScreen').classList.add('hidden');
+            document.getElementById('displayScreen').classList.add('hidden');
+            document.getElementById('controllerScreen').classList.add('hidden');
+
+            if (mode === 'display') {
+                document.getElementById('displayScreen').classList.remove('hidden');
+                startHostingGame();
+            } else if (mode === 'controller') {
+                document.getElementById('controllerScreen').classList.remove('hidden');
+                loadCustomLayout();
+                setupTouchListeners();
+                setupCustomizationListeners();
+            }
+        }
+
+        function returnToLanding() {
+            if (peer) { try { peer.destroy(); } catch(e) {} }
+            window.location.href = window.location.pathname;
+        }
+
+        /* ==================== HOST / DISPLAY LOGIC ==================== */
+        function startHostingGame() {
+            isHost = true;
+            const customRoomCode = generateAlphanumericCode(6);
+
+            document.getElementById('tvRoomCode').innerText = customRoomCode;
+            document.getElementById('waitingCodeDisplay').innerText = customRoomCode;
+            document.getElementById('displayPeerId').innerText = customRoomCode;
+
+            generateQrCode(customRoomCode);
+
+            peer = new Peer(customRoomCode, {
+                host: window.location.hostname,
+                port: window.location.port || (window.location.protocol === 'https:' ? 443 : 3000),
+                path: '/peerjs/myapp',
+                config: {'iceServers': [{ urls: 'stun:stun.l.google.com:19302' }]}
+            });
+
+            peer.on('error', (err) => {
+                if (err.type === 'unavailable-id') {
+                    startHostingGame(); // Retry with new code if collision
+                }
+            });
+
+            peer.on('connection', (incomingConn) => {
+                conn = incomingConn;
+                document.getElementById('tvConnectionBadge').className = 'text-xs px-2.5 py-1 rounded-xl font-bold bg-green-600 text-white border border-green-500';
+                document.getElementById('tvConnectionBadge').innerText = 'Phone Connected 🎮';
+
+                conn.on('data', (data) => {
+                    if (data.type === 'load_url') {
+                        loadGameUrlOnTV(data.url);
+                    }
+                });
+
+                conn.on('close', () => {
+                    document.getElementById('tvConnectionBadge').className = 'text-xs px-2.5 py-1 rounded-xl font-bold bg-amber-600 text-white border border-amber-500';
+                    document.getElementById('tvConnectionBadge').innerText = 'Phone Disconnected';
+                });
+            });
+        }
+
+        function loadGameUrlOnTV(rawUrl) {
+            let finalUrl = rawUrl.trim();
+            if (finalUrl.startsWith('<iframe')) {
+                const srcMatch = finalUrl.match(/src=["']([^"']+)["']/);
+                if (srcMatch && srcMatch[1]) finalUrl = srcMatch[1];
+            }
+
+            document.getElementById('tvWaitingNotice').classList.add('hidden');
+            const viewport = document.getElementById('iframeViewport');
+            viewport.classList.remove('hidden');
+
+            const iframe = document.getElementById('gameIframe');
+            iframe.src = finalUrl;
+            iframe.focus();
+        }
+
+        function generateQrCode(roomCode) {
+            const qrContainer = document.getElementById('qrcode');
+            qrContainer.innerHTML = '';
+            
+            const currentUrl = window.location.origin + window.location.pathname;
+            const targetUrl = `${currentUrl}?room=${roomCode}`;
+
+            try {
+                qrCodeInstance = new QRCode(qrContainer, {
+                    text: targetUrl,
+                    width: 160,
+                    height: 160,
+                    colorDark : "#030712",
+                    colorLight : "#ffffff",
+                    correctLevel : QRCode.CorrectLevel.H
+                });
+            } catch (e) {
+                qrContainer.innerText = roomCode;
+            }
+        }
+
+        function togglePeerModal() {
+            document.getElementById('peerModal').classList.toggle('hidden');
+        }
+
+        function toggleCropToolbar() {
+            document.getElementById('cropToolbar').classList.toggle('hidden');
+        }
+
+        function updateCropTransform() {
+            cropScale = parseInt(document.getElementById('cropScaleRange').value);
+            document.getElementById('cropScaleVal').innerText = cropScale + '%';
+            applyCropTransform();
+        }
+
+        function adjustCropPan(dx, dy) {
+            cropPanX += dx;
+            cropPanY += dy;
+            applyCropTransform();
+        }
+
+        function resetCrop() {
+            cropScale = 100;
+            cropPanX = 0;
+            cropPanY = 0;
+            document.getElementById('cropScaleRange').value = 100;
+            document.getElementById('cropScaleVal').innerText = '100%';
+            applyCropTransform();
+        }
+
+        function applyCropTransform() {
+            const scaler = document.getElementById('iframeScaler');
+            const scaleFactor = cropScale / 100;
+            scaler.style.transform = `scale(${scaleFactor}) translate(${cropPanX}px, ${cropPanY}px)`;
+        }
+
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(() => {});
+            } else {
+                document.exitFullscreen();
+            }
+        }
+
+
+        /* ==================== CONTROLLER LOGIC (PHONE) ==================== */
+        function connectToHost() {
+            const codeInput = document.getElementById('peerIdInput').value.trim().toUpperCase();
+            if (codeInput.length !== 6) {
+                alert('Please enter a valid 6-digit room code.');
+                return;
+            }
+
+            const btnConnect = document.getElementById('btnConnect');
+            btnConnect.disabled = true;
+            btnConnect.innerHTML = '<i class="fa-solid fa-circle-notch animate-spin"></i> <span>CONNECTING...</span>';
+
+            peer = new Peer({
+                host: window.location.hostname,
+                port: window.location.port || (window.location.protocol === 'https:' ? 443 : 3000),
+                path: '/peerjs/myapp',
+                config: {'iceServers': [{ urls: 'stun:stun.l.google.com:19302' }]}
+            });
+
+            peer.on('open', () => {
+                conn = peer.connect(codeInput, { reliable: true });
+
+                conn.on('open', () => {
+                    updateControllerStatus(true, 'Connected to TV');
+                    document.getElementById('connectForm').classList.add('hidden');
+                    if (hapticsEnabled && navigator.vibrate) navigator.vibrate([100, 50, 100]);
+                });
+
+                conn.on('close', () => {
+                    updateControllerStatus(false, 'Disconnected');
+                    document.getElementById('connectForm').classList.remove('hidden');
+                    btnConnect.disabled = false;
+                    btnConnect.innerHTML = '<span>CONNECT TO TV</span>';
+                });
+
+                conn.on('error', () => {
+                    alert('Room code not found. Make sure TV Display is open.');
+                    btnConnect.disabled = false;
+                    btnConnect.innerHTML = '<span>CONNECT TO TV</span>';
+                });
+            });
+        }
+
+        function updateControllerStatus(isConnected, text) {
+            const badge = document.getElementById('controllerStatusBadge');
+            const statusText = document.getElementById('controllerStatusText');
+            badge.className = isConnected ? 'w-2.5 h-2.5 rounded-full bg-green-500' : 'w-2.5 h-2.5 rounded-full bg-red-500';
+            statusText.className = isConnected ? 'text-xs font-semibold text-green-400' : 'text-xs font-semibold text-red-400';
+            statusText.innerText = text;
+        }
+
+        function toggleUrlModal() {
+            document.getElementById('urlModal').classList.toggle('hidden');
+        }
+
+        function toggleSettingsModal() {
+            document.getElementById('settingsModal').classList.toggle('hidden');
+        }
+
+        function sendGameUrlToTV() {
+            const urlVal = document.getElementById('gameUrlInput').value.trim();
+            if (!urlVal) {
+                alert('Please enter a valid game URL or iframe code.');
+                return;
+            }
+
+            if (conn && conn.open) {
+                conn.send({ type: 'load_url', url: urlVal });
+                toggleUrlModal();
+                alert('🚀 Game URL casted to TV successfully!');
+            } else {
+                alert('Controller not connected to TV yet.');
+            }
+        }
+
+        function extractIframeSrc() {
+            const text = document.getElementById('gameUrlInput').value.trim();
+            const match = text.match(/src=["']([^"']+)["']/);
+            if (match && match[1]) {
+                document.getElementById('gameUrlInput').value = match[1];
+            } else {
+                alert('No iframe src URL found in snippet.');
+            }
+        }
+
+        /* Controller Customization & Drag Handlers */
+        function startCustomizeLayout() {
+            toggleSettingsModal();
+            isEditMode = true;
+            document.body.classList.add('edit-mode');
+            document.getElementById('editModeBar').classList.remove('hidden');
+        }
+
+        function saveAndExitCustomization() {
+            isEditMode = false;
+            deselectCustomItem();
+            document.body.classList.remove('edit-mode');
+            document.getElementById('editModeBar').classList.add('hidden');
+            saveCustomLayout();
+        }
+
+        function selectCustomItem(el) {
+            deselectCustomItem();
+            selectedCustomItem = el;
+            selectedCustomItem.classList.add('selected-target');
+        }
+
+        function deselectCustomItem() {
+            if (selectedCustomItem) {
+                selectedCustomItem.classList.remove('selected-target');
+                selectedCustomItem = null;
+            }
+        }
+
+        function changeSelectedSize(multiplier) {
+            if (!selectedCustomItem) return;
+            const id = selectedCustomItem.id;
+            if (customLayout[id]) {
+                let currentScale = customLayout[id].scale || 1.0;
+                currentScale *= multiplier;
+                currentScale = Math.max(0.5, Math.min(2.5, currentScale));
+                customLayout[id].scale = currentScale;
+                applyLayoutToDOM();
+            }
+        }
+
+        function setupCustomizationListeners() {
+            const items = document.querySelectorAll('.customizable-item');
+
+            items.forEach(item => {
+                item.addEventListener('pointerdown', (e) => {
+                    if (!isEditMode) return;
+                    e.stopPropagation();
+                    selectCustomItem(item);
+                    isDraggingCustom = true;
+                    item.setPointerCapture(e.pointerId);
+
+                    const rect = item.getBoundingClientRect();
+                    dragOffset.x = e.clientX - rect.left;
+                    dragOffset.y = e.clientY - rect.top;
+                });
+
+                item.addEventListener('pointermove', (e) => {
+                    if (!isEditMode || !isDraggingCustom || selectedCustomItem !== item) return;
+                    e.stopPropagation();
+
+                    const container = document.getElementById('virtualGamepad').getBoundingClientRect();
+                    let newLeft = e.clientX - container.left - dragOffset.x;
+                    let newTop = e.clientY - container.top - dragOffset.y;
+
+                    newLeft = Math.max(0, Math.min(container.width - 60, newLeft));
+                    newTop = Math.max(0, Math.min(container.height - 40, newTop));
+
+                    const id = item.id;
+                    if (customLayout[id]) {
+                        customLayout[id].left = `${newLeft}px`;
+                        customLayout[id].top = `${newTop}px`;
+                        customLayout[id].bottom = 'auto';
+                        customLayout[id].right = 'auto';
+                        customLayout[id].transformX = '0%';
+                    }
+                    applyLayoutToDOM();
+                });
+
+                const endDrag = () => { if (isEditMode) isDraggingCustom = false; };
+                item.addEventListener('pointerup', endDrag);
+                item.addEventListener('pointercancel', endDrag);
+            });
+        }
+
+        function setupTouchListeners() {
+            document.querySelectorAll('[data-button]').forEach(btn => {
+                const buttonName = btn.getAttribute('data-button');
+
+                const handlePress = (e) => {
+                    if (isEditMode) return;
+                    e.preventDefault();
+                    btn.classList.add('active');
+                    if (hapticsEnabled && navigator.vibrate) navigator.vibrate(15);
+                };
+
+                const handleRelease = (e) => {
+                    if (isEditMode) return;
+                    e.preventDefault();
+                    btn.classList.remove('active');
+                };
+
+                btn.addEventListener('pointerdown', handlePress);
+                btn.addEventListener('pointerup', handleRelease);
+                btn.addEventListener('pointercancel', handleRelease);
+                btn.addEventListener('pointerleave', handleRelease);
+            });
+        }
+
+        function toggleHaptics() {
+            hapticsEnabled = !hapticsEnabled;
+            const btn = document.getElementById('hapticsToggleBtn');
+            if (btn) btn.innerText = hapticsEnabled ? 'Vibrations: ON' : 'Vibrations: OFF';
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            loadCustomLayout();
+            const urlParams = new URLSearchParams(window.location.search);
+            const roomParam = urlParams.get('room');
+            if (roomParam) {
+                switchMode('controller');
+                document.getElementById('peerIdInput').value = roomParam.toUpperCase();
+                connectToHost();
+            }
+        });
+    </script>
+</body>
+</html>
